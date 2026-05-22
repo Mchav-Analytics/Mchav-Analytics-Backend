@@ -12,17 +12,17 @@ Plataforma inteligente para KPIs de desarrollo
 
 Plataforma inteligente para gestión y visualización de KPIs de equipos de desarrollo mediante integración con Jira Cloud.
 
-📌 Descripción
+<h1 align="center">📌 Descripción</h1>
 
 QUANTARA es una plataforma web desarrollada para automatizar el cálculo, almacenamiento y visualización de KPIs de equipos de desarrollo utilizando la API REST de Jira Cloud.
 
 El sistema permite transformar datos técnicos en información estratégica mediante dashboards interactivos, métricas automatizadas y reportes inteligentes para líderes de proyecto y directivos.
 
-🎯 Objetivo
+<h1 align="center">🎯 Objetivo</h1>
 
 Centralizar el análisis de productividad y desempeño de equipos de desarrollo mediante métricas obtenidas desde Jira usando consultas JQL y procesamiento automatizado de datos.
 
-⚡ Características Principales
+<h1 align="center">⚡ Características Principales</h1>
 
 ✅ Integración con Jira Cloud API v3
 ✅ Consultas dinámicas usando JQL
@@ -35,7 +35,7 @@ Centralizar el análisis de productividad y desempeño de equipos de desarrollo 
 ✅ Despliegue contenerizado con Docker
 ✅ Arquitectura cloud-ready sobre AWS
 
-📊 KPIs Soportados
+<h1 align="center">📊 KPIs Soportados</h1>
 
 - Sprint Velocity
 - Lead Time
@@ -45,7 +45,7 @@ Centralizar el análisis de productividad y desempeño de equipos de desarrollo 
 - Resolution Rate
 
 <p align="center">
-  <img src="arquitectura.svg"/>
+  <img src="estructura.jpg"/>
 </p>
 
 <h1 align="center">🏗️ Arquitectura General</h1>
@@ -64,7 +64,7 @@ Centralizar el análisis de productividad y desempeño de equipos de desarrollo 
 - Auth: JWT
 - Version Control: Git + GitHub
 
-🔐 Seguridad
+<h1 align="center">🔐 Seguridad</h1>
 
 - Autenticación basada en JWT
 - Control de acceso por roles
@@ -72,13 +72,13 @@ Centralizar el análisis de productividad y desempeño de equipos de desarrollo 
 - Protección de rutas en frontend
 - Arquitectura desacoplada
 
-👥 Roles del Sistema
+<h1 align="center">👥 Roles del Sistema</h1>
 
 - Admin: Gestión completa del sistema
 - Manager: Visualización y análisis de KPIs
 - Developer: Consulta de métricas individuales
 
-🚀 Instalación
+<h1 align="center">🚀 Instalación</h1>
 
 1️⃣ Clonar repositorio
 
@@ -105,7 +105,7 @@ JWT_SECRET=
 docker-compose up --build
 ```
 
-📂 Estructura del Proyecto
+<h1 align="center">📂 Estructura del Proyecto</h1>
 
 quantara/
 │
@@ -116,6 +116,6 @@ quantara/
 ├── docs/
 ├── docker-compose.yml
 
-📁 Documentación
+<h1 align="center">📁 Documentación</h1>
 
 La carpeta `Documentacion QUANTARA/` contiene la documentación adicional del proyecto, incluyendo instrucciones, diagramas y una guía de uso general.
