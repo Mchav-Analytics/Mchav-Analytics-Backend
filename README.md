@@ -47,7 +47,7 @@ Centralizar el análisis de productividad y desempeño de equipos de desarrollo 
 <h1 align="center">🏗️ Arquitectura General</h1>
 
 <p align="center">
-  <img src="estructura.png"/>
+  <img src="images/estructura.png"/>
 </p>
 
 <h1 align="center">🛠️ Stack Tecnológico</h1>
