@@ -44,13 +44,11 @@ Centralizar el análisis de productividad y desempeño de equipos de desarrollo 
 - Reopen Rate
 - Resolution Rate
 
-<p align="center">
-  <img src="estructura.jpg"/>
-</p>
-
 <h1 align="center">🏗️ Arquitectura General</h1>
 
-
+<p align="center">
+  <img src="estructura.png"/>
+</p>
 
 <h1 align="center">🛠️ Stack Tecnológico</h1>
 
