@@ -1,3 +1,14 @@
+<p align="center">
+  <img src="images/banner.png"/>
+</p>
+
+<h1 align="center">🚀 QUANTARA</h1>
+
+<p align="center">
+Plataforma inteligente para KPIs de desarrollo
+</p>
+
+
 🚀 QUANTARA
 
 Plataforma inteligente para gestión y visualización de KPIs de equipos de desarrollo mediante integración con Jira Cloud.
