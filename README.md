@@ -24,16 +24,16 @@ Centralizar el análisis de productividad y desempeño de equipos de desarrollo 
 
 <h1 align="center">⚡ Características Principales</h1>
 
-✅ Integración con Jira Cloud API v3
-✅ Consultas dinámicas usando JQL
-✅ Dashboards interactivos en tiempo real
-✅ Cálculo automático de KPIs
-✅ Autenticación segura con JWT
-✅ Exportación de reportes PDF
-✅ Scheduler para sincronización automática
-✅ Infraestructura como código con Terraform
-✅ Despliegue contenerizado con Docker
-✅ Arquitectura cloud-ready sobre AWS
+- ✅ Integración con Jira Cloud API v3
+- ✅ Consultas dinámicas usando JQL
+- ✅ Dashboards interactivos en tiempo real
+- ✅ Cálculo automático de KPIs
+- ✅ Autenticación segura con JWT
+- ✅ Exportación de reportes PDF
+- ✅ Scheduler para sincronización automática
+- ✅ Infraestructura como código con Terraform
+- ✅ Despliegue contenerizado con Docker
+- ✅ Arquitectura cloud-ready sobre AWS
 
 <h1 align="center">📊 KPIs Soportados</h1>
 
