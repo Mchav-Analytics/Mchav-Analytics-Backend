@@ -78,14 +78,15 @@ Centralizar el análisis de productividad y desempeño de equipos de desarrollo 
 
 <h1 align="center">🚀 Instalación</h1>
 
-1️⃣ Clonar repositorio
+<h1 align="center">1️⃣ Clonar repositorio</h1>
 
 ```bash
 git clone https://github.com/kamiloo1/QUANTARA.git
 cd QUANTARA
 ```
 
-2️⃣ Variables de entorno
+<h1 align="center">2️⃣ Variables de entorno</h1>
+
 
 Crear archivo `.env`
 
@@ -97,7 +98,8 @@ DATABASE_URL=
 JWT_SECRET=
 ```
 
-3️⃣ Levantar contenedores
+<h1 align="center">3️⃣ Levantar contenedores</h1>
+
 
 ```bash
 docker-compose up --build
