@@ -9,7 +9,6 @@ Plataforma inteligente para KPIs de desarrollo
 </p>
 
 
-🚀 QUANTARA
 
 Plataforma inteligente para gestión y visualización de KPIs de equipos de desarrollo mediante integración con Jira Cloud.
 
@@ -45,26 +44,15 @@ Centralizar el análisis de productividad y desempeño de equipos de desarrollo 
 - Reopen Rate
 - Resolution Rate
 
-🏗️ Arquitectura General
+<p align="center">
+  <img src="arquitectura.svg"/>
+</p>
 
-- **Jira Cloud**
-  - REST API v3
-  - Envía datos a la capa backend
-- **FastAPI Backend**
-  - KPI Processing
-  - Recibe datos Jira y calcula métricas
-  - Exposición de API para el frontend
-- **PostgreSQL**
-  - Historical Data
-  - Almacenamiento de métricas y eventos
-- **React Frontend**
-  - Interactive Charts
-  - Visualización de KPIs y dashboards
-- **Usuarios**
-  - Managers / Leads
-  - Consumo de información estratégica
+<h1 align="center">🏗️ Arquitectura General</h1>
 
-🛠️ Stack Tecnológico
+
+
+<h1 align="center">🛠️ Stack Tecnológico</h1>
 
 - Backend: Python + FastAPI
 - Frontend: React + TypeScript
