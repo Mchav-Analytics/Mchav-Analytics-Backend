@@ -36,34 +36,22 @@ Centralizar el análisis de productividad y desempeño de equipos de desarrollo 
 
 🏗️ Arquitectura General
 
-┌───────────────────┐
-│     Jira Cloud    │
-│   REST API v3     │
-└─────────┬─────────┘
-          │
-          ▼
-┌───────────────────┐
-│   FastAPI Backend │
-│   KPI Processing  │
-└─────────┬─────────┘
-          │
-          ▼
-┌───────────────────┐
-│    PostgreSQL     │
-│ Historical Data   │
-└─────────┬─────────┘
-          │
-          ▼
-┌───────────────────┐
-│   React Frontend  │
-│ Interactive Charts│
-└─────────┬─────────┘
-          │
-          ▼
-┌───────────────────┐
-│      Usuarios     │
-│ Managers / Leads  │
-└───────────────────┘
+- **Jira Cloud**
+  - REST API v3
+  - Envía datos a la capa backend
+- **FastAPI Backend**
+  - KPI Processing
+  - Recibe datos Jira y calcula métricas
+  - Exposición de API para el frontend
+- **PostgreSQL**
+  - Historical Data
+  - Almacenamiento de métricas y eventos
+- **React Frontend**
+  - Interactive Charts
+  - Visualización de KPIs y dashboards
+- **Usuarios**
+  - Managers / Leads
+  - Consumo de información estratégica
 
 🛠️ Stack Tecnológico
 
