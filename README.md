@@ -1,121 +1,165 @@
-<p align="center">
-  <img src="images/banner.png"/>
-</p>
+# MCHAV Analytics Backend
 
-<h1 align="center">🚀 QUANTARA</h1>
+> API REST para automatización de KPIs, integración con Jira Cloud y procesamiento de analítica de desarrollo.
 
-<p align="center">
-Plataforma inteligente para KPIs de desarrollo
-</p>
+![Python](https://img.shields.io/badge/Python-FastAPI-blue?style=for-the-badge\&logo=python)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Database-316192?style=for-the-badge\&logo=postgresql)
+![Docker](https://img.shields.io/badge/Docker-Container-2496ED?style=for-the-badge\&logo=docker)
+![Swagger](https://img.shields.io/badge/OpenAPI-Swagger-85EA2D?style=for-the-badge\&logo=swagger)
 
+---
 
+## Descripción
 
-Plataforma inteligente para gestión y visualización de KPIs de equipos de desarrollo mediante integración con Jira Cloud.
+MCHAV Analytics Backend es responsable de:
 
-<h1 align="center">📌 Descripción</h1>
+* Integración con Jira Cloud API
+* Procesamiento y cálculo de KPIs
+* Exposición de endpoints REST
+* Automatización de sincronización de datos
+* Seguridad y autenticación JWT
 
-QUANTARA es una plataforma web desarrollada para automatizar el cálculo, almacenamiento y visualización de KPIs de equipos de desarrollo utilizando la API REST de Jira Cloud.
+---
 
-El sistema permite transformar datos técnicos en información estratégica mediante dashboards interactivos, métricas automatizadas y reportes inteligentes para líderes de proyecto y directivos.
+## Características
 
-<h1 align="center">🎯 Objetivo</h1>
+* Integración con Jira REST API v3
+* Consultas dinámicas mediante JQL
+* Autenticación JWT
+* Scheduler de sincronización automática
+* Persistencia con PostgreSQL
+* Documentación Swagger/OpenAPI
+* Clean Architecture
+* Servicios dockerizados
 
-Centralizar el análisis de productividad y desempeño de equipos de desarrollo mediante métricas obtenidas desde Jira usando consultas JQL y procesamiento automatizado de datos.
+---
 
-<h1 align="center">⚡ Características Principales</h1>
+## KPIs Procesados
 
-- ✅ Integración con Jira Cloud API v3
-- ✅ Consultas dinámicas usando JQL
-- ✅ Dashboards interactivos en tiempo real
-- ✅ Cálculo automático de KPIs
-- ✅ Autenticación segura con JWT
-- ✅ Exportación de reportes PDF
-- ✅ Scheduler para sincronización automática
-- ✅ Infraestructura como código con Terraform
-- ✅ Despliegue contenerizado con Docker
-- ✅ Arquitectura cloud-ready sobre AWS
+* Sprint Velocity
+* Lead Time
+* Cycle Time
+* Throughput
+* Reopen Rate
 
-<h1 align="center">📊 KPIs Soportados</h1>
+---
 
-- Sprint Velocity
-- Lead Time
-- Cycle Time
-- Throughput
-- Reopen Rate
-- Resolution Rate
+## Stack Tecnológico
 
-<h1 align="center">🏗️ Arquitectura General</h1>
+| Tecnología | Propósito       |
+| ---------- | --------------- |
+| FastAPI    | API REST        |
+| PostgreSQL | Base de datos   |
+| SQLAlchemy | ORM             |
+| Alembic    | Migraciones     |
+| JWT        | Seguridad       |
+| Docker     | Contenerización |
+| Pytest     | Testing         |
 
-<p align="center">
-  <img src="images/estructura.png"/>
-</p>
+---
 
-<h1 align="center">🛠️ Stack Tecnológico</h1>
-
-- Backend: Python + FastAPI
-- Frontend: React + TypeScript
-- Database: PostgreSQL
-- Cloud: AWS
-- IaC: Terraform
-- Containers: Docker
-- Charts: Chart.js
-- Auth: JWT
-- Version Control: Git + GitHub
-
-<h1 align="center">🔐 Seguridad</h1>
-
-- Autenticación basada en JWT
-- Control de acceso por roles
-- Variables de entorno seguras
-- Protección de rutas en frontend
-- Arquitectura desacoplada
-
-<h1 align="center">👥 Roles del Sistema</h1>
-
-- Admin: Gestión completa del sistema
-- Manager: Visualización y análisis de KPIs
-- Developer: Consulta de métricas individuales
-
-<h1 align="center">🚀 Instalación</h1>
-
-<h1 align="center">1️⃣ Clonar repositorio</h1>
+## Arquitectura
 
 ```bash
-git clone https://github.com/kamiloo1/QUANTARA.git
-cd QUANTARA
+app/
+├── api/
+├── core/
+├── models/
+├── schemas/
+├── services/
+├── repositories/
+├── scheduler/
+├── middleware/
+└── tests/
 ```
 
-<h1 align="center">2️⃣ Variables de entorno</h1>
+---
 
+## Instalación
 
-Crear archivo `.env`
+### Clonar repositorio
 
-```text
+```bash
+git clone https://github.com/tu-org/mchav-analytics-backend.git
+```
+
+---
+
+### Crear entorno virtual
+
+```bash
+python -m venv venv
+```
+
+---
+
+### Instalar dependencias
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+### Variables de entorno
+
+```env
+DATABASE_URL=
+JWT_SECRET=
 JIRA_BASE_URL=
 JIRA_EMAIL=
 JIRA_API_TOKEN=
-DATABASE_URL=
-JWT_SECRET=
 ```
 
-<h1 align="center">3️⃣ Levantar contenedores</h1>
+---
 
+### Ejecutar servidor
 
 ```bash
-docker-compose up --build
+uvicorn app.main:app --reload
 ```
 
-<h1 align="center">📂 Estructura del Proyecto</h1>
+---
 
-quantara/
-│
-├── backend/
-├── frontend/
-├── infrastructure/
-├── database/
-├── docs/
-├── docker-compose.yml
+## Documentación API
 
-<h1 align="center">📁 Documentación</h1>
+Swagger disponible en:
 
-La carpeta `Documentacion QUANTARA/` contiene la documentación adicional del proyecto, incluyendo instrucciones, diagramas y una guía de uso general.
+```bash
+http://localhost:8000/docs
+```
+
+---
+
+## Testing
+
+```bash
+pytest
+```
+
+---
+
+## Seguridad
+
+* Autenticación JWT
+* RBAC Authorization
+* Variables de entorno seguras
+* Endpoints protegidos
+* Validación de tokens
+
+---
+
+## Compatibilidad Cloud
+
+Compatible con:
+
+* Docker
+* AWS
+* Terraform
+* GitHub Actions
+
+---
+
+## Equipo
+
+Desarrollado para Grupo ASD SAS.
