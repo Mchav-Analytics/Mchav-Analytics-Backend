@@ -9,6 +9,36 @@ from app.core.security import verify_session_id
 from app.services.jira_sync import run_jira_sync_task
 from app.services.kpi import calculate_and_save_kpis
 import app.models as models
+from pydantic import BaseModel
+from typing import List, Optional
+
+class JiraMetricsResponse(BaseModel):
+    """Métricas generales obtenidas en vivo desde Jira."""
+    active_projects: int
+    completed_tickets: int
+    in_progress_tickets: int
+    critical_bugs: int
+
+class SyncMessageResponse(BaseModel):
+    """Respuesta de inicio de sincronización ETL."""
+    message: str
+
+class SyncLogResponse(BaseModel):
+    """Registro de ejecución de sincronización ETL."""
+    id_log: int
+    id_usuario: int
+    fecha_ejecucion: datetime
+    resultado: str
+    detalles: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class WebhookResponse(BaseModel):
+    """Respuesta del Webhook de Jira."""
+    status: str
+    reason: Optional[str] = None
+    issue: Optional[str] = None
 
 router = APIRouter()
 
@@ -28,7 +58,17 @@ def check_user_exists(db: Session, user_id: int):
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
     return user
 
-@router.get("/metrics")
+@router.get(
+    "/metrics", 
+    response_model=JiraMetricsResponse,
+    summary="Obtener métricas rápidas con JQL",
+    description="""
+    Realiza 3 consultas **JQL** a Jira para obtener totales rápidos en tiempo real:
+    * `statusCategory=Done`
+    * `statusCategory="In Progress"`
+    * `issuetype=Bug AND priority=Highest`
+    """
+)
 async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
     user = check_user_exists(db, user_id)
@@ -72,7 +112,16 @@ async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
                 raise e
             raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/sync")
+@router.post(
+    "/sync",
+    response_model=SyncMessageResponse,
+    summary="Ejecutar motor ETL de Sincronización",
+    description="""
+    Arranca el proceso pesado (Background Task) para descargar toda la historia de tickets a nuestra base de datos PostgreSQL.
+    * **JQL Principal:** `project='{LLAVE_DEL_PROYECTO}'`
+    * Utiliza el parámetro `expand=changelog` para traer el historial minuto a minuto de cada ticket.
+    """
+)
 async def trigger_jira_sync(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
     user = check_user_exists(db, user_id)
@@ -80,7 +129,12 @@ async def trigger_jira_sync(request: Request, background_tasks: BackgroundTasks,
     background_tasks.add_task(run_jira_sync_task, user.id_usuario)
     return {"message": "Sincronización iniciada en segundo plano"}
 
-@router.get("/sync/logs")
+@router.get(
+    "/sync/logs",
+    response_model=List[SyncLogResponse],
+    summary="Obtener historial de Sincronizaciones (Auditoría ETL)",
+    description="Lee la tabla local de PostgreSQL para retornar el estado de las últimas tareas de sincronización (RUNNING, SUCCESS, FAILED)."
+)
 async def get_sync_logs(request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
     check_user_exists(db, user_id)
@@ -88,7 +142,12 @@ async def get_sync_logs(request: Request, db: Session = Depends(get_db)):
     logs = db.query(models.LogsSincronizacion).order_by(models.LogsSincronizacion.fecha_ejecucion.desc()).limit(20).all()
     return logs
 
-@router.post("/webhook")
+@router.post(
+    "/webhook",
+    response_model=WebhookResponse,
+    summary="Recibir Webhooks de Jira",
+    description="Endpoint pasivo que espera a que Jira le envíe un Payload JSON cada vez que se crea, edita o mueve un ticket. Actualiza los KPIs en tiempo real."
+)
 async def jira_webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     issue_data = payload.get("issue", {})

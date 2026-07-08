@@ -189,7 +189,7 @@ async def sync_issues_and_transitions(
         while True:
             jql = f"project = '{project.key_proyecto}'"
             fields_to_request = f"summary,status,created,resolutiondate,key,{sprint_field_id},{sp_field_id}"
-            url = f"{base_url}/search?jql={jql}&expand=changelog&startAt={start_at}&maxResults={max_results}&fields={fields_to_request}"
+            url = f"{base_url}/search/jql?jql={jql}&expand=changelog&startAt={start_at}&maxResults={max_results}&fields={fields_to_request}"
             
             res = await jira_request(client, "GET", url, headers, db, user)
             if res.status_code != 200:

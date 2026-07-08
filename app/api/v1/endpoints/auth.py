@@ -66,7 +66,8 @@ def login():
         "prompt": "consent"
     }
     
-    query_string = "&".join([f"{k}={v.replace(' ', '%20')}" for k, v in params.items()])
+    import urllib.parse
+    query_string = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
     authorization_url = f"{AUTHORIZATION_BASE_URL}?{query_string}"
     
     return RedirectResponse(url=authorization_url)
