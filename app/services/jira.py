@@ -14,6 +14,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 
 from app.core.config import settings
+from app.core.exceptions import JiraConnectionError, JiraQueryError
 
 
 class JiraService:
@@ -52,40 +53,83 @@ class JiraService:
     # -----------------------------------------------------------------
     def verificar_proyecto(self, project_key: str) -> dict | None:
         if not self._configured():
-            raise RuntimeError("La conexión con Jira no está configurada (variables de entorno faltantes).")
+            raise JiraConnectionError(
+                "La conexión con Jira no está configurada (variables de entorno faltantes)."
+            )
 
         url = f"{self.base_url}/rest/api/3/project/{project_key}"
         try:
             response = requests.get(url, auth=self._auth(), headers=self.headers, timeout=10)
         except Exception as e:
-            raise RuntimeError(f"Error de conexión con la API de Jira: {e}")
+            raise JiraConnectionError(f"Error de conexión con la API de Jira: {e}") from e
 
         if response.status_code == 200:
             return response.json()
         if response.status_code == 404:
             return None
-        raise RuntimeError(f"Error al consultar Jira: {response.status_code} - {response.text}")
+        raise JiraConnectionError(f"Error al consultar Jira: {response.status_code} - {response.text}")
+
+    def obtener_boards(self, project_key: str) -> list[dict]:
+        if not self._configured():
+            raise JiraConnectionError("La conexión con Jira no está configurada.")
+
+        url = f"{self.base_url}/rest/agile/1.0/board"
+        params = {"projectKeyOrId": project_key}
+        try:
+            response = requests.get(
+                url, auth=self._auth(), headers=self.headers, params=params, timeout=15
+            )
+        except Exception as e:
+            raise JiraConnectionError(f"Error al consultar boards de Jira: {e}") from e
+
+        if response.status_code == 404:
+            return []
+        if response.status_code != 200:
+            raise JiraConnectionError(
+                f"Error al obtener boards: {response.status_code} - {response.text}"
+            )
+        return response.json().get("values", [])
+
+    def obtener_sprints(self, board_id: str, max_results: int = 50) -> list[dict]:
+        if not self._configured():
+            raise JiraConnectionError("La conexión con Jira no está configurada.")
+
+        url = f"{self.base_url}/rest/agile/1.0/board/{board_id}/sprint"
+        params = {"maxResults": max_results}
+        try:
+            response = requests.get(
+                url, auth=self._auth(), headers=self.headers, params=params, timeout=15
+            )
+        except Exception as e:
+            raise JiraConnectionError(f"Error al consultar sprints de Jira: {e}") from e
+
+        if response.status_code == 404:
+            return []
+        if response.status_code != 200:
+            raise JiraConnectionError(
+                f"Error al obtener sprints: {response.status_code} - {response.text}"
+            )
+        return response.json().get("values", [])
 
     # -----------------------------------------------------------------
     # HU-008: ejecutar queries JQL
     # -----------------------------------------------------------------
     def buscar_issues(self, jql: str, start_at: int = 0, max_results: int = 50) -> dict:
         if not self._configured():
-            raise RuntimeError("La conexión con Jira no está configurada.")
+            raise JiraConnectionError("La conexión con Jira no está configurada.")
 
         url = f"{self.base_url}/rest/api/3/search"
         params = {"jql": jql, "startAt": start_at, "maxResults": max_results}
         try:
             response = requests.get(url, auth=self._auth(), headers=self.headers, params=params, timeout=15)
         except Exception as e:
-            raise RuntimeError(f"Error de conexión con la API de Jira: {e}")
+            raise JiraConnectionError(f"Error de conexión con la API de Jira: {e}") from e
 
         if response.status_code == 200:
             return response.json()
         if response.status_code == 400:
-            # JQL inválida (CA-04 HU-008)
-            raise ValueError(f"Consulta JQL inválida: {response.text}")
-        raise RuntimeError(f"Error al ejecutar JQL: {response.status_code} - {response.text}")
+            raise JiraQueryError(f"Consulta JQL inválida: {response.text}")
+        raise JiraConnectionError(f"Error al ejecutar JQL: {response.status_code} - {response.text}")
 
 
 # Bloque de prueba local (igual al tuyo, para validar credenciales sueltas)

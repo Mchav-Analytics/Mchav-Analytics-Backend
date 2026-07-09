@@ -21,7 +21,10 @@ export function AuthCallbackPage() {
     saveAccessToken(token);
     window.history.replaceState({}, document.title, "/auth/callback");
     setStatus("success");
-    setMessage("Autenticación exitosa. Ya puedes consumir los endpoints protegidos.");
+    setMessage("Autenticación exitosa. Redirigiendo al dashboard...");
+    window.setTimeout(() => {
+      window.location.assign("/dashboard");
+    }, 700);
   }, []);
 
   return (
@@ -33,8 +36,8 @@ export function AuthCallbackPage() {
         </div>
         <h2>{status === "success" ? "Login completado" : "Callback de autenticación"}</h2>
         <p className={status === "error" ? "error-message" : "description"}>{message}</p>
-        <a className="secondary-link" href="/">
-          Volver al inicio
+        <a className="secondary-link" href="/dashboard">
+          Ir al dashboard
         </a>
       </section>
     </main>

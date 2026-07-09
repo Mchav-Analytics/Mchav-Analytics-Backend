@@ -72,8 +72,7 @@ export function LoginPage() {
 
   return (
     <main className="auth-page">
-      <div className="ambient ambient-one" />
-      <div className="ambient ambient-two" />
+      <div className="rain-pattern" aria-hidden="true" />
 
       <section className="login-card" aria-label="Integración Jira MCHAV">
         <div className="logo-lockup">

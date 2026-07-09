@@ -29,6 +29,180 @@ a {
   width: 100%;
   overflow: hidden;
   padding: 24px;
+  background: #081322;
+}
+
+.rain-pattern {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.42;
+  mask-image: radial-gradient(ellipse 85% 75% at 50% 45%, #000 25%, transparent 78%);
+}
+
+.rain-pattern::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: #081322;
+  background-image:
+    radial-gradient(4px 100px at 0px 235px, rgb(92 255 218 / 75%), transparent),
+    radial-gradient(4px 100px at 300px 235px, rgb(134 92 255 / 65%), transparent),
+    radial-gradient(1.5px 1.5px at 150px 117.5px, rgb(92 255 218 / 90%) 100%, transparent 150%),
+    radial-gradient(4px 100px at 0px 252px, rgb(134 92 255 / 65%), transparent),
+    radial-gradient(4px 100px at 300px 252px, rgb(92 255 218 / 75%), transparent),
+    radial-gradient(1.5px 1.5px at 150px 126px, rgb(134 92 255 / 85%) 100%, transparent 150%),
+    radial-gradient(4px 100px at 0px 150px, rgb(92 255 218 / 75%), transparent),
+    radial-gradient(4px 100px at 300px 150px, rgb(134 92 255 / 65%), transparent),
+    radial-gradient(1.5px 1.5px at 150px 75px, rgb(92 255 218 / 90%) 100%, transparent 150%),
+    radial-gradient(4px 100px at 0px 253px, rgb(134 92 255 / 65%), transparent),
+    radial-gradient(4px 100px at 300px 253px, rgb(92 255 218 / 75%), transparent),
+    radial-gradient(1.5px 1.5px at 150px 126.5px, rgb(134 92 255 / 85%) 100%, transparent 150%),
+    radial-gradient(4px 100px at 0px 204px, rgb(92 255 218 / 75%), transparent),
+    radial-gradient(4px 100px at 300px 204px, rgb(134 92 255 / 65%), transparent),
+    radial-gradient(1.5px 1.5px at 150px 102px, rgb(92 255 218 / 90%) 100%, transparent 150%),
+    radial-gradient(4px 100px at 0px 134px, rgb(134 92 255 / 65%), transparent),
+    radial-gradient(4px 100px at 300px 134px, rgb(92 255 218 / 75%), transparent),
+    radial-gradient(1.5px 1.5px at 150px 67px, rgb(134 92 255 / 85%) 100%, transparent 150%),
+    radial-gradient(4px 100px at 0px 179px, rgb(92 255 218 / 75%), transparent),
+    radial-gradient(4px 100px at 300px 179px, rgb(134 92 255 / 65%), transparent),
+    radial-gradient(1.5px 1.5px at 150px 89.5px, rgb(92 255 218 / 90%) 100%, transparent 150%),
+    radial-gradient(4px 100px at 0px 299px, rgb(134 92 255 / 65%), transparent),
+    radial-gradient(4px 100px at 300px 299px, rgb(92 255 218 / 75%), transparent),
+    radial-gradient(1.5px 1.5px at 150px 149.5px, rgb(134 92 255 / 85%) 100%, transparent 150%),
+    radial-gradient(4px 100px at 0px 215px, rgb(92 255 218 / 75%), transparent),
+    radial-gradient(4px 100px at 300px 215px, rgb(134 92 255 / 65%), transparent),
+    radial-gradient(1.5px 1.5px at 150px 107.5px, rgb(92 255 218 / 90%) 100%, transparent 150%),
+    radial-gradient(4px 100px at 0px 281px, rgb(134 92 255 / 65%), transparent),
+    radial-gradient(4px 100px at 300px 281px, rgb(92 255 218 / 75%), transparent),
+    radial-gradient(1.5px 1.5px at 150px 140.5px, rgb(134 92 255 / 85%) 100%, transparent 150%),
+    radial-gradient(4px 100px at 0px 158px, rgb(92 255 218 / 75%), transparent),
+    radial-gradient(4px 100px at 300px 158px, rgb(134 92 255 / 65%), transparent),
+    radial-gradient(1.5px 1.5px at 150px 79px, rgb(92 255 218 / 90%) 100%, transparent 150%),
+    radial-gradient(4px 100px at 0px 210px, rgb(134 92 255 / 65%), transparent),
+    radial-gradient(4px 100px at 300px 210px, rgb(92 255 218 / 75%), transparent),
+    radial-gradient(1.5px 1.5px at 150px 105px, rgb(134 92 255 / 85%) 100%, transparent 150%);
+  background-size:
+    300px 235px,
+    300px 235px,
+    300px 235px,
+    300px 252px,
+    300px 252px,
+    300px 252px,
+    300px 150px,
+    300px 150px,
+    300px 150px,
+    300px 253px,
+    300px 253px,
+    300px 253px,
+    300px 204px,
+    300px 204px,
+    300px 204px,
+    300px 134px,
+    300px 134px,
+    300px 134px,
+    300px 179px,
+    300px 179px,
+    300px 179px,
+    300px 299px,
+    300px 299px,
+    300px 299px,
+    300px 215px,
+    300px 215px,
+    300px 215px,
+    300px 281px,
+    300px 281px,
+    300px 281px,
+    300px 158px,
+    300px 158px,
+    300px 158px,
+    300px 210px,
+    300px 210px,
+    300px 210px;
+  animation: rain-fall 150s linear infinite;
+}
+
+@keyframes rain-fall {
+  0% {
+    background-position:
+      0px 220px,
+      3px 220px,
+      151.5px 337.5px,
+      25px 24px,
+      28px 24px,
+      176.5px 150px,
+      50px 16px,
+      53px 16px,
+      201.5px 91px,
+      75px 224px,
+      78px 224px,
+      226.5px 350.5px,
+      100px 19px,
+      103px 19px,
+      251.5px 121px,
+      125px 120px,
+      128px 120px,
+      276.5px 187px,
+      150px 31px,
+      153px 31px,
+      301.5px 120.5px,
+      175px 235px,
+      178px 235px,
+      326.5px 384.5px,
+      200px 121px,
+      203px 121px,
+      351.5px 228.5px,
+      225px 224px,
+      228px 224px,
+      376.5px 364.5px,
+      250px 26px,
+      253px 26px,
+      401.5px 105px,
+      275px 75px,
+      278px 75px,
+      426.5px 180px;
+  }
+
+  to {
+    background-position:
+      0px 6800px,
+      3px 6800px,
+      151.5px 6917.5px,
+      25px 13632px,
+      28px 13632px,
+      176.5px 13758px,
+      50px 5416px,
+      53px 5416px,
+      201.5px 5491px,
+      75px 17175px,
+      78px 17175px,
+      226.5px 17301.5px,
+      100px 5119px,
+      103px 5119px,
+      251.5px 5221px,
+      125px 8428px,
+      128px 8428px,
+      276.5px 8495px,
+      150px 9876px,
+      153px 9876px,
+      301.5px 9965.5px,
+      175px 13391px,
+      178px 13391px,
+      326.5px 13540.5px,
+      200px 14741px,
+      203px 14741px,
+      351.5px 14848.5px,
+      225px 18770px,
+      228px 18770px,
+      376.5px 18910.5px,
+      250px 5082px,
+      253px 5082px,
+      401.5px 5161px,
+      275px 6375px,
+      278px 6375px,
+      426.5px 6480px;
+  }
 }
 
 .ambient {
@@ -562,5 +736,291 @@ h2 {
 
   .security-copy {
     max-width: 280px;
+  }
+}
+
+/* Dashboard shell */
+.app-shell {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  min-height: 100vh;
+  background: #081322;
+  color: #e2e8f0;
+}
+
+.app-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 24px 18px;
+  border-right: 1px solid rgb(255 255 255 / 10%);
+  background: rgb(255 255 255 / 4%);
+}
+
+.app-sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-sidebar__brand img {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+}
+
+.app-sidebar__brand strong {
+  display: block;
+  font-size: 15px;
+}
+
+.app-sidebar__brand span {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.app-sidebar__nav {
+  display: grid;
+  gap: 8px;
+}
+
+.app-sidebar__nav a {
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: #cbd5e1;
+  text-decoration: none;
+}
+
+.app-sidebar__nav a.active,
+.app-sidebar__nav a:hover {
+  background: rgb(92 255 218 / 12%);
+  color: #ffffff;
+}
+
+.app-sidebar__logout {
+  margin-top: auto;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 10px;
+  background: transparent;
+  color: #e2e8f0;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.app-main {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+}
+
+.app-topbar {
+  padding: 24px 28px 12px;
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+}
+
+.app-topbar__eyebrow {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.app-topbar h1 {
+  margin: 6px 0 0;
+  font-size: 28px;
+}
+
+.app-content {
+  padding: 20px 28px 32px;
+}
+
+.dashboard-page {
+  display: grid;
+  gap: 20px;
+}
+
+.dashboard-filters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dashboard-filters label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.dashboard-filters select,
+.dashboard-filters input {
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 6%);
+  color: #f8fafc;
+  padding: 10px 12px;
+}
+
+.dashboard-filters__search {
+  grid-column: span 1;
+}
+
+.dashboard-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.kpi-card {
+  padding: 16px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 6%);
+}
+
+.kpi-card span {
+  display: block;
+  color: #94a3b8;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.kpi-card strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 24px;
+}
+
+.dashboard-charts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.chart-card,
+.ui-card {
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 6%);
+}
+
+.chart-card {
+  padding: 16px;
+}
+
+.chart-card h4 {
+  margin: 0 0 12px;
+}
+
+.ui-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 0;
+}
+
+.ui-card__header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.ui-card__header p {
+  margin: 4px 0 0;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.ui-card__body {
+  padding: 16px 18px 18px;
+}
+
+.ui-button {
+  border: 0;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #18d6bd 0%, #5b6ff9 100%);
+  color: #ffffff;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.ui-button--secondary,
+.ui-button--ghost {
+  background: rgb(255 255 255 / 8%);
+  border: 1px solid rgb(255 255 255 / 14%);
+}
+
+.ui-spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #cbd5e1;
+}
+
+.ui-spinner__ring {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgb(255 255 255 / 20%);
+  border-top-color: #18d6bd;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+.ui-state {
+  padding: 20px;
+  border-radius: 14px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  background: rgb(255 255 255 / 5%);
+}
+
+.ui-state--error {
+  border-color: rgb(244 63 94 / 35%);
+}
+
+.ui-table-wrap {
+  overflow: auto;
+}
+
+.ui-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ui-table th,
+.ui-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+  text-align: left;
+  font-size: 14px;
+}
+
+.ui-table__sort,
+.ui-table__label {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ui-table__empty {
+  color: #94a3b8;
+}
+
+@media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .app-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid rgb(255 255 255 / 10%);
+  }
+
+  .dashboard-filters,
+  .dashboard-kpis,
+  .dashboard-charts {
+    grid-template-columns: 1fr;
   }
 }
