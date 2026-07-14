@@ -1,32 +1,26 @@
-# MCHAV Analytics — Backend
+# MCHAV Analytics
 
-Capa intermedia sobre Jira para métricas, sincronización y calidad operativa.
-
-## Stack
-
-- FastAPI + Uvicorn
-- PostgreSQL + SQLAlchemy + Alembic
-- Docker Compose (no requiere Python instalado en tu PC)
+Monorepo con backend (FastAPI) y frontend (React) para métricas, sincronización Jira y dashboard operativo.
 
 ## Estructura
 
 ```text
-app/
-  core/           Configuración y excepciones
-  routers/        Endpoints HTTP (auth, jira, projects, kpis, admin)
-  schemas/        Contratos Pydantic para Swagger
-  services/       Lógica de negocio (jira, sync, kpi, auth)
-    mappers/      Transformación JSON Jira -> modelos locales
-  features/jira/models/   Modelos ORM
-  seeds/          Datos iniciales (roles, KPIs, admin)
-tests/            Pruebas unitarias e integración ligera
+backend/
+  app/              API, servicios, modelos ORM y seeds
+  alembic/          Migraciones de base de datos
+  tests/            Pruebas pytest
+  Dockerfile
+  requirements.txt
+frontend/
+  src/              Dashboard, auth y cliente API
+docker-compose.yml  Backend + PostgreSQL
 ```
 
 ## Levantar entorno (sin Python local)
 
 ```powershell
-# 1. Crear .env desde .env.example
-copy .env.example .env
+# 1. Crear .env en la raíz del repo
+copy backend\.env.example .env
 
 # 2. Levantar servicios
 docker compose up -d --build
@@ -40,6 +34,16 @@ docker compose exec backend python -m app.seeds
 # 5. Probar salud
 curl http://localhost:8080/health
 ```
+
+## Frontend
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+El dev server corre en `http://localhost:3000` y hace proxy de `/api` hacia el backend en `:8080`.
 
 ## Endpoints principales
 
@@ -68,9 +72,13 @@ curl http://localhost:8080/health
 
 ```powershell
 docker compose exec backend pytest -q
+cd frontend
+npm test
 ```
 
 ## Variables de entorno críticas
+
+El archivo `.env` vive en la raíz del repo (lo lee `docker-compose.yml`).
 
 - `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` → conexión técnica a Jira
 - `JIRA_CLIENT_ID`, `JIRA_CLIENT_SECRET` → OAuth de usuarios
