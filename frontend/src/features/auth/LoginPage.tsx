@@ -59,10 +59,10 @@ export function LoginPage() {
     setError(null);
 
     try {
-      const { auth_url } = await requestJiraLogin();
+      const authUrl = await requestJiraLogin();
       setConnectionStatus("success");
       window.setTimeout(() => {
-        window.location.assign(auth_url);
+        window.location.assign(authUrl);
       }, 450);
     } catch {
       setError("No se pudo conectar, intenta de nuevo");

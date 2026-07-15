@@ -1,9 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends
 
-from app.database import get_db
-from app.dependencies import get_current_user
-from app.features.jira.models import Sprint
+from app.dependencies import get_current_user, get_kpi_service, require_role
 from app.schemas.common import DataResponse
 from app.schemas.kpi import KpiValueOut, SprintKpisOut
 from app.services.kpi import KpiService
@@ -11,42 +8,32 @@ from app.services.kpi import KpiService
 router = APIRouter(prefix="/api/kpis", tags=["KPIs"])
 
 
+def _to_sprint_kpis_out(payload: dict) -> SprintKpisOut:
+    return SprintKpisOut(
+        id_sprint=payload["id_sprint"],
+        sprint_name=payload["sprint_name"],
+        kpis=[KpiValueOut(**item) for item in payload["kpis"]],
+    )
+
+
 @router.get("/sprints/{sprint_id}", response_model=DataResponse[SprintKpisOut])
-async def obtener_kpis_sprint(
+def obtener_kpis_sprint(
     sprint_id: int,
-    db: Session = Depends(get_db),
+    service: KpiService = Depends(get_kpi_service),
     _current_user=Depends(get_current_user),
 ):
-    sprint = db.query(Sprint).filter(Sprint.id_sprint == sprint_id).first()
-    if not sprint:
-        raise HTTPException(status_code=404, detail="Sprint no encontrado")
-
-    service = KpiService(db)
-    kpis = service.get_latest_sprint_kpis(sprint_id)
-    payload = SprintKpisOut(
-        id_sprint=sprint.id_sprint,
-        sprint_name=sprint.name,
-        kpis=[KpiValueOut(**item) for item in kpis],
-    )
-    return DataResponse(data=payload)
+    payload = service.build_sprint_kpis_payload(sprint_id)
+    return DataResponse(data=_to_sprint_kpis_out(payload))
 
 
-@router.post("/sprints/{sprint_id}/compute", response_model=DataResponse[SprintKpisOut])
-async def calcular_kpis_sprint(
+@router.post(
+    "/sprints/{sprint_id}/compute",
+    response_model=DataResponse[SprintKpisOut],
+)
+def calcular_kpis_sprint(
     sprint_id: int,
-    db: Session = Depends(get_db),
-    _current_user=Depends(get_current_user),
+    service: KpiService = Depends(get_kpi_service),
+    _admin=Depends(require_role("Administrador")),
 ):
-    sprint = db.query(Sprint).filter(Sprint.id_sprint == sprint_id).first()
-    if not sprint:
-        raise HTTPException(status_code=404, detail="Sprint no encontrado")
-
-    service = KpiService(db)
-    service.compute_and_store_sprint_kpis(sprint_id)
-    kpis = service.get_latest_sprint_kpis(sprint_id)
-    payload = SprintKpisOut(
-        id_sprint=sprint.id_sprint,
-        sprint_name=sprint.name,
-        kpis=[KpiValueOut(**item) for item in kpis],
-    )
-    return DataResponse(data=payload)
+    payload = service.compute_and_return_sprint_kpis(sprint_id)
+    return DataResponse(data=_to_sprint_kpis_out(payload))

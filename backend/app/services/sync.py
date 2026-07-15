@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.exceptions import JiraConnectionError, JiraNotFoundError
 from app.features.jira.models import (
     Board,
@@ -152,7 +153,7 @@ class SyncService:
 
         for issue_data in issues:
             fields = issue_data.get("fields", {})
-            sprint_field = fields.get("customfield_10020") or []
+            sprint_field = fields.get(settings.JIRA_SPRINT_FIELD) or []
             sprint_name = None
             if isinstance(sprint_field, list) and sprint_field:
                 latest = sprint_field[-1]

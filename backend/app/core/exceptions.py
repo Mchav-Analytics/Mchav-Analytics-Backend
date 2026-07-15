@@ -10,6 +10,11 @@ class AppError(Exception):
         super().__init__(message)
 
 
+class NotFoundError(AppError):
+    def __init__(self, message: str):
+        super().__init__(message, status_code=404)
+
+
 class JiraConnectionError(AppError):
     def __init__(self, message: str):
         super().__init__(message, status_code=502)

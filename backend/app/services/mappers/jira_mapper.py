@@ -1,10 +1,6 @@
 from datetime import datetime, timezone
 
-STORY_POINT_FIELDS = (
-    "customfield_10016",
-    "customfield_10002",
-    "storyPoints",
-)
+from app.core.config import settings
 
 
 def parse_jira_datetime(value: str | None) -> datetime | None:
@@ -18,7 +14,7 @@ def parse_jira_datetime(value: str | None) -> datetime | None:
 
 
 def extract_story_points(fields: dict) -> int | None:
-    for field_name in STORY_POINT_FIELDS:
+    for field_name in settings.story_point_field_names:
         raw = fields.get(field_name)
         if raw is None:
             continue

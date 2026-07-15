@@ -23,7 +23,7 @@ class DataResponse(BaseModel, Generic[T]):
 class PaginatedMeta(BaseModel):
     total: int
     page: int = Field(ge=1)
-    page_size: int = Field(ge=1, le=200)
+    page_size: int = Field(ge=1, le=100)
 
 
 class PaginatedResponse(BaseModel, Generic[T]):

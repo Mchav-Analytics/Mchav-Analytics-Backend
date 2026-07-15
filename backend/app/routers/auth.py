@@ -8,19 +8,19 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.database import get_db
-from app.schemas.common import StatusResponse
+from app.schemas.common import DataResponse, StatusResponse
 from app.services import auth as auth_service
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 logger = logging.getLogger("mchav.auth")
 
 
-@router.get("/login")
+@router.get("/login", response_model=DataResponse[dict])
 async def login(request: Request):
     state = secrets.token_urlsafe(16)
     request.session["oauth_state"] = state
     auth_url = auth_service.build_authorization_url(state)
-    return {"auth_url": auth_url}
+    return DataResponse(data={"auth_url": auth_url})
 
 
 @router.get("/callback")

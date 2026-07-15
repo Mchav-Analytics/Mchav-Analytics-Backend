@@ -130,17 +130,3 @@ class JiraService:
         if response.status_code == 400:
             raise JiraQueryError(f"Consulta JQL inválida: {response.text}")
         raise JiraConnectionError(f"Error al ejecutar JQL: {response.status_code} - {response.text}")
-
-
-# Bloque de prueba local (igual al tuyo, para validar credenciales sueltas)
-if __name__ == "__main__":
-    print("Probando conexión con Jira para el proyecto 'SCRUM'...")
-    service = JiraService()
-    proyecto = service.verificar_proyecto("SCRUM")
-
-    if proyecto:
-        print("¡Conexión exitosa con Jira!")
-        print(f"Nombre del Proyecto: {proyecto.get('name')}")
-        print(f"ID del Proyecto: {proyecto.get('id')}")
-    else:
-        print("No se pudo obtener la información del proyecto.")

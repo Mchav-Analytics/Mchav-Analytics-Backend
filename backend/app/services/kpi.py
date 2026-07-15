@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import NotFoundError
 from app.features.jira.models import Issue, KpiHistory, KpiType, Sprint
 
 
@@ -87,6 +88,25 @@ class KpiService:
             "open_issues": self.calculate_open_issues(sprint_id),
         }
         return [self.persist_kpi(sprint_id, name, value) for name, value in calculations.items()]
+
+    def _get_sprint(self, sprint_id: int) -> Sprint:
+        sprint = self.db.query(Sprint).filter(Sprint.id_sprint == sprint_id).first()
+        if not sprint:
+            raise NotFoundError("Sprint no encontrado")
+        return sprint
+
+    def build_sprint_kpis_payload(self, sprint_id: int) -> dict:
+        sprint = self._get_sprint(sprint_id)
+        kpis = self.get_latest_sprint_kpis(sprint_id)
+        return {
+            "id_sprint": sprint.id_sprint,
+            "sprint_name": sprint.name,
+            "kpis": kpis,
+        }
+
+    def compute_and_return_sprint_kpis(self, sprint_id: int) -> dict:
+        self.compute_and_store_sprint_kpis(sprint_id)
+        return self.build_sprint_kpis_payload(sprint_id)
 
     def get_latest_sprint_kpis(self, sprint_id: int) -> list[dict]:
         rows = (

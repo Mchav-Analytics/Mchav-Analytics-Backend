@@ -1,10 +1,13 @@
 import { clearAccessToken } from "./authStorage";
 
 export type LoginResponse = {
-  auth_url: string;
+  status: string;
+  data: {
+    auth_url: string;
+  };
 };
 
-export async function requestJiraLogin(): Promise<LoginResponse> {
+export async function requestJiraLogin(): Promise<string> {
   const response = await fetch("/api/auth/login", {
     method: "GET",
     credentials: "include",
@@ -14,7 +17,8 @@ export async function requestJiraLogin(): Promise<LoginResponse> {
     throw new Error("No fue posible iniciar el login con Jira.");
   }
 
-  return response.json() as Promise<LoginResponse>;
+  const body = (await response.json()) as LoginResponse;
+  return body.data.auth_url;
 }
 
 export async function logout(): Promise<void> {
