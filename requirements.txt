@@ -7,3 +7,4 @@ pydantic==2.6.1
 sqlalchemy
 psycopg2-binary
 pytest==8.0.0
+alembic

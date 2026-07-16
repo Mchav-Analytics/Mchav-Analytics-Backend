@@ -8,6 +8,7 @@ from app.core.config import CLIENT_ID, CLIENT_SECRET, CALLBACK_URL, FRONTEND_URL
 from app.core.database import get_db
 from app.core.security import sign_session_id, verify_session_id
 import app.models as models
+from app.repositories import user_repo
 
 router = APIRouter()
 
@@ -29,7 +30,7 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)):
     if not user_id:
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
         
-    user = db.query(models.User).filter(models.User.id_usuario == user_id).first()
+    user = user_repo.get(db, user_id)
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
         
@@ -123,27 +124,22 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
         nombre = profile.get("displayName")
         
         # 3. Guardar/Actualizar en PostgreSQL buscando por el accountId único
-        user = db.query(models.User).filter(models.User.jira_account_id == jira_account_id).first()
-        if not user:
-            user = models.User(
-                jira_account_id=jira_account_id,
-                email=email,
-                nombre=nombre,
-                access_token=access_token,
-                refresh_token=refresh_token,
-                cloud_id=cloud_id
-            )
-            db.add(user)
-        else:
-            user.email = email
-            user.nombre = nombre
-            user.access_token = access_token
-            user.refresh_token = refresh_token
-            user.cloud_id = cloud_id
-            
-        db.commit()
-        db.refresh(user)
+        user = user_repo.get_by_jira_account_id(db, jira_account_id)
         
+        u_data = {
+            "jira_account_id": jira_account_id,
+            "email": email,
+            "nombre": nombre,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "cloud_id": cloud_id
+        }
+        
+        if not user:
+            user = user_repo.create(db, obj_in=u_data)
+        else:
+            user = user_repo.update(db, db_obj=user, obj_in=u_data)
+            
         # 4. Redirigir al frontend y setear cookie firmada
         redirect = RedirectResponse(url=f"{FRONTEND_URL}/dashboard?login=success")
         signed_session = sign_session_id(user.id_usuario)

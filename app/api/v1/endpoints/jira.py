@@ -11,6 +11,12 @@ from app.services.kpi import calculate_and_save_kpis
 import app.models as models
 from pydantic import BaseModel
 from typing import List, Optional
+from app.repositories import user_repo, project_repo, sprint_repo, issue_repo, transition_repo, log_repo
+from app.core.cache import ShortLivedCache
+
+# Instancia global de caché en memoria de 60 segundos para métricas en vivo
+metrics_cache = ShortLivedCache(ttl_seconds=60)
+
 
 class JiraMetricsResponse(BaseModel):
     """Métricas generales obtenidas en vivo desde Jira."""
@@ -26,10 +32,13 @@ class SyncMessageResponse(BaseModel):
 class SyncLogResponse(BaseModel):
     """Registro de ejecución de sincronización ETL."""
     id_log: int
-    id_usuario: int
     fecha_ejecucion: datetime
+    tipo_sincronizacion: str
     resultado: str
-    detalles: Optional[str] = None
+    tiempo_ejecucion_segundos: int
+    issues_procesados: int
+    detalle_error: Optional[str] = None
+    ejecutado_por: str
 
     class Config:
         from_attributes = True
@@ -53,7 +62,7 @@ def get_current_user_id(request: Request) -> int:
     return user_id
 
 def check_user_exists(db: Session, user_id: int):
-    user = db.query(models.User).filter(models.User.id_usuario == user_id).first()
+    user = user_repo.get(db, user_id)
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
     return user
@@ -72,6 +81,12 @@ def check_user_exists(db: Session, user_id: int):
 async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
     user = check_user_exists(db, user_id)
+    
+    # La llave de caché incluye el ID del usuario y cloud_id para evitar fugas de información
+    cache_key = f"metrics:{user.id_usuario}:{user.cloud_id}"
+    cached_data = metrics_cache.get(cache_key)
+    if cached_data:
+        return cached_data
         
     base_jira_url = f"https://api.atlassian.com/ex/jira/{user.cloud_id}/rest/api/3"
     headers = {
@@ -101,16 +116,21 @@ async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
             progress_data = progress_res.json() if progress_res.status_code == 200 else {}
             bugs_data = bugs_res.json() if bugs_res.status_code == 200 else {}
             
-            return {
+            result_data = {
                 "active_projects": active_projects,
                 "completed_tickets": done_data.get("total", 0),
                 "in_progress_tickets": progress_data.get("total", 0),
                 "critical_bugs": bugs_data.get("total", 0)
             }
+            
+            # Almacenar en caché antes de retornar
+            metrics_cache.set(cache_key, result_data)
+            return result_data
         except Exception as e:
             if isinstance(e, HTTPException):
                 raise e
             raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post(
     "/sync",
@@ -135,12 +155,18 @@ async def trigger_jira_sync(request: Request, background_tasks: BackgroundTasks,
     summary="Obtener historial de Sincronizaciones (Auditoría ETL)",
     description="Lee la tabla local de PostgreSQL para retornar el estado de las últimas tareas de sincronización (RUNNING, SUCCESS, FAILED)."
 )
-async def get_sync_logs(request: Request, db: Session = Depends(get_db)):
+async def get_sync_logs(
+    request: Request,
+    limit: int = 20,
+    offset: int = 0,
+    db: Session = Depends(get_db)
+):
     user_id = get_current_user_id(request)
     check_user_exists(db, user_id)
         
-    logs = db.query(models.LogsSincronizacion).order_by(models.LogsSincronizacion.fecha_ejecucion.desc()).limit(20).all()
+    logs = log_repo.get_recent(db, skip=offset, limit=limit)
     return logs
+
 
 @router.post(
     "/webhook",
@@ -161,7 +187,7 @@ async def jira_webhook(request: Request, db: Session = Depends(get_db)):
     project_data = fields.get("project", {}) or {}
     project_id = str(project_data.get("id"))
     
-    db_project = db.query(models.Proyecto).filter(models.Proyecto.id_proyecto == project_id).first()
+    db_project = project_repo.get(db, project_id)
     if not db_project:
         return {"status": "ignored", "reason": f"project {project_id} not synced"}
         
@@ -211,47 +237,46 @@ async def jira_webhook(request: Request, db: Session = Depends(get_db)):
         associated_sprint_ids.append(active_sprint_id)
         
     if active_sprint_id:
-        sprint_exists = db.query(models.Sprint).filter(models.Sprint.id_sprint == active_sprint_id).first()
+        sprint_exists = sprint_repo.get(db, active_sprint_id)
         if not sprint_exists:
-            sprint_exists = models.Sprint(
-                id_sprint=active_sprint_id,
-                id_proyecto=project_id,
-                nombre=sprints_raw.get("name") if isinstance(sprints_raw, dict) else "Sprint Sincronizado",
-                estado=sprints_raw.get("state") if isinstance(sprints_raw, dict) else "active"
-            )
-            db.add(sprint_exists)
+            sprint_exists = sprint_repo.create(db, obj_in={
+                "id_sprint": active_sprint_id,
+                "id_proyecto": project_id,
+                "nombre": sprints_raw.get("name") if isinstance(sprints_raw, dict) else "Sprint Sincronizado",
+                "estado": sprints_raw.get("state") if isinstance(sprints_raw, dict) else "active"
+            })
             
-    db_issue = db.query(models.Issue).filter(models.Issue.id_jira == issue_id).first()
+    db_issue = issue_repo.get(db, issue_id)
+    
+    i_data = {
+        "id_jira": issue_id,
+        "key_issue": issue_key,
+        "id_proyecto": project_id,
+        "id_sprint": active_sprint_id,
+        "summary": summary,
+        "status_actual": status_actual,
+        "story_points": story_points,
+        "created_at": created_at,
+        "resolved_at": resolved_at
+    }
+    
     if not db_issue:
-        db_issue = models.Issue(
-            id_jira=issue_id,
-            key_issue=issue_key,
-            id_proyecto=project_id,
-            id_sprint=active_sprint_id,
-            summary=summary,
-            status_actual=status_actual,
-            story_points=story_points,
-            created_at=created_at,
-            resolved_at=resolved_at
-        )
-        db.add(db_issue)
+        db_issue = issue_repo.create(db, obj_in=i_data)
     else:
-        db_issue.key_issue = issue_key
-        db_issue.id_sprint = active_sprint_id
-        db_issue.summary = summary
-        db_issue.status_actual = status_actual
         if story_points > 0:
-            db_issue.story_points = story_points
-        db_issue.created_at = created_at
-        db_issue.resolved_at = resolved_at
+            i_data["story_points"] = story_points
+        else:
+            i_data["story_points"] = db_issue.story_points
+        db_issue = issue_repo.update(db, db_obj=db_issue, obj_in=i_data)
         
     db_issue.sprints.clear()
     for s_id in associated_sprint_ids:
-        sprint_obj = db.query(models.Sprint).filter(models.Sprint.id_sprint == s_id).first()
+        sprint_obj = sprint_repo.get(db, s_id)
         if sprint_obj:
             db_issue.sprints.append(sprint_obj)
+    db.commit() # Relaciones
             
-    db.query(models.TransicionEstadoIssue).filter(models.TransicionEstadoIssue.id_jira == issue_id).delete()
+    transition_repo.delete_by_issue(db, issue_id)
     
     changelog = payload.get("changelog", {}) or {}
     histories = changelog.get("histories", []) or []
@@ -264,16 +289,13 @@ async def jira_webhook(request: Request, db: Session = Depends(get_db)):
                 estado_anterior = item.get("fromString")
                 estado_nuevo = item.get("toString")
                 
-                db_transition = models.TransicionEstadoIssue(
-                    id_jira=issue_id,
-                    estado_anterior=estado_anterior,
-                    estado_nuevo=estado_nuevo,
-                    fecha_cambio=history_date
-                )
-                db.add(db_transition)
+                transition_repo.create(db, obj_in={
+                    "id_jira": issue_id,
+                    "estado_anterior": estado_anterior,
+                    "estado_nuevo": estado_nuevo,
+                    "fecha_cambio": history_date
+                })
                 
-    db.commit()
-    
     calculate_and_save_kpis(db, project_id)
     
     return {"status": "success", "issue": issue_key}

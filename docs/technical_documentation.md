@@ -212,9 +212,10 @@ La capa de persistencia está acoplada directamente a SQLAlchemy. Los modelos fu
 - Un **`Issue`** posee una relación de uno a muchos con **`TransicionEstadoIssue`**, permitiendo rastrear el histórico completo de cambios de estado.
 - Un **`Proyecto`** posee múltiples registros de **`MapeoEstado`** para parametrizar las equivalencias de estados de Jira.
 
-> [!WARNING]
-> **Falta de Esquemas Pydantic**: 
-> A pesar de que `pydantic` se encuentra listado en el archivo de dependencias `requirements.txt`, no hay esquemas Pydantic (`BaseModel`) implementados en el código python del backend para la validación y serialización de los payloads. Los endpoints aceptan entradas dinámicas como `list[dict]` u objetos JSON crudos y devuelven modelos SQLAlchemy directos. Esto representa un área de riesgo para la mantenibilidad (ver sección 5).
+> [!NOTE]
+> **Esquemas Pydantic y Serialización**: 
+> La validación de entrada y la serialización de salida se realiza estrictamente a través de modelos de **Pydantic** (`JQLQueryResponse`, `SyncLogResponse`, `JiraMetricsResponse`, etc.) definidos en `app/schemas/` y en los enrutadores correspondientes, evitando fugas de información y protegiendo al frontend de cambios inesperados de tipos en las APIs.
+
 
 ### Sincronización Incremental Nocturna en Segundo Plano
 * **Implementación actual**: 

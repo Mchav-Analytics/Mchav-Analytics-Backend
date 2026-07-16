@@ -1,6 +1,8 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import select, func, case
 from datetime import datetime, timezone
 import app.models as models
+from app.repositories import project_repo, mapping_repo, issue_repo, kpi_repo, sprint_repo
 
 def get_issue_cycle_time_days(issue: models.Issue, in_progress_statuses: set[str] = None) -> float:
     if not issue.resolved_at:
@@ -25,71 +27,44 @@ def get_issue_cycle_time_days(issue: models.Issue, in_progress_statuses: set[str
         return max(0.0, delta.total_seconds() / 86400.0)
 
 def calculate_and_save_kpis(db: Session, proyecto_id: str):
-    proyecto = db.query(models.Proyecto).filter(models.Proyecto.id_proyecto == proyecto_id).first()
+    proyecto = project_repo.get(db, id=proyecto_id)
     if not proyecto:
         print(f"Error calculating KPIs: Project {proyecto_id} not found")
         return
         
-    # Obtener mapeo de estados personalizados desde la base de datos
-    mappings = db.query(models.MapeoEstado).filter(
-        models.MapeoEstado.id_proyecto == proyecto_id,
-        models.MapeoEstado.estado_base == "IN_PROGRESS"
-    ).all()
+    mappings = mapping_repo.get_by_project_and_base(db, proyecto_id, "IN_PROGRESS")
     
     if mappings:
         in_progress_statuses = {m.estado_jira.lower() for m in mappings}
     else:
-        in_progress_statuses = None
+        in_progress_statuses = {"in progress", "en progreso", "desarrollo", "in development", "doing", "active", "en desarrollo"}
         
-    # --- CÁLCULO DE KPIS GENERALES DEL PROYECTO (id_sprint IS NULL) ---
-    all_project_issues = db.query(models.Issue).filter(models.Issue.id_proyecto == proyecto_id).all()
-    resolved_issues = [i for i in all_project_issues if i.resolved_at is not None]
+    # Query project-wide aggregates directly
+    general_stats = issue_repo.get_resolved_stats_by_project(db, proyecto_id, in_progress_statuses)
     
-    total_sp = sum(float(i.story_points or 0.0) for i in resolved_issues)
-    throughput = len(resolved_issues)
+    total_sp, throughput, avg_lead_time, avg_cycle_time = general_stats
     
-    lead_times = []
-    cycle_times = []
-    
-    for issue in resolved_issues:
-        lt = (issue.resolved_at - issue.created_at).total_seconds() / 86400.0
-        lead_times.append(max(0.0, lt))
-        
-        ct = get_issue_cycle_time_days(issue, in_progress_statuses)
-        cycle_times.append(ct)
-        
-    avg_lead_time = sum(lead_times) / len(lead_times) if lead_times else 0.0
-    avg_cycle_time = sum(cycle_times) / len(cycle_times) if cycle_times else 0.0
-    
-    general_kpi = db.query(models.KpisHistoricos).filter(
-        models.KpisHistoricos.id_proyecto == proyecto_id,
-        models.KpisHistoricos.id_sprint == None
-    ).first()
-    
+    general_kpi = kpi_repo.get_general_kpi(db, proyecto_id)
     now_utc = datetime.now(timezone.utc)
     
+    kpi_in = {
+        "id_proyecto": proyecto_id,
+        "id_sprint": None,
+        "velocity_total_sp": float(total_sp),
+        "velocity_promedio_historico": float(total_sp),
+        "throughput_issues": int(throughput),
+        "lead_time_promedio_dias": float(avg_lead_time),
+        "cycle_time_promedio_dias": float(avg_cycle_time),
+        "fecha_calculo": now_utc
+    }
+    
     if not general_kpi:
-        general_kpi = models.KpisHistoricos(
-            id_proyecto=proyecto_id,
-            id_sprint=None,
-            velocity_total_sp=total_sp,
-            velocity_promedio_historico=total_sp,
-            throughput_issues=throughput,
-            lead_time_promedio_dias=avg_lead_time,
-            cycle_time_promedio_dias=avg_cycle_time,
-            fecha_calculo=now_utc
-        )
-        db.add(general_kpi)
+        kpi_repo.create(db, obj_in=kpi_in)
     else:
-        general_kpi.velocity_total_sp = total_sp
-        general_kpi.velocity_promedio_historico = total_sp
-        general_kpi.throughput_issues = throughput
-        general_kpi.lead_time_promedio_dias = avg_lead_time
-        general_kpi.cycle_time_promedio_dias = avg_cycle_time
-        general_kpi.fecha_calculo = now_utc
+        kpi_repo.update(db, db_obj=general_kpi, obj_in=kpi_in)
         
-    # --- CÁLCULO DE KPIS POR SPRINT ---
-    sprints = db.query(models.Sprint).filter(models.Sprint.id_proyecto == proyecto_id).all()
+    # Query project sprints
+    sprints = sprint_repo.get_by_project(db, proyecto_id)
     sprint_velocities = []
     
     def get_sort_key(s):
@@ -101,54 +76,34 @@ def calculate_and_save_kpis(db: Session, proyecto_id: str):
     sorted_sprints = sorted(sprints, key=get_sort_key)
     
     for sprint in sorted_sprints:
-        sprint_issues = db.query(models.Issue).filter(models.Issue.id_sprint == sprint.id_sprint).all()
-        sprint_resolved = [i for i in sprint_issues if i.resolved_at is not None]
+        # Query sprint aggregates directly
+        sprint_stats = issue_repo.get_resolved_stats_by_sprint(db, sprint.id_sprint, in_progress_statuses)
         
-        s_total_sp = sum(float(i.story_points or 0.0) for i in sprint_resolved)
-        s_throughput = len(sprint_resolved)
-        
-        s_lead_times = []
-        s_cycle_times = []
-        
-        for issue in sprint_resolved:
-            lt = (issue.resolved_at - issue.created_at).total_seconds() / 86400.0
-            s_lead_times.append(max(0.0, lt))
-            
-            ct = get_issue_cycle_time_days(issue, in_progress_statuses)
-            s_cycle_times.append(ct)
-            
-        s_avg_lead_time = sum(s_lead_times) / len(s_lead_times) if s_lead_times else 0.0
-        s_avg_cycle_time = sum(s_cycle_times) / len(s_cycle_times) if s_cycle_times else 0.0
+        s_total_sp, s_throughput, s_avg_lead_time, s_avg_cycle_time = sprint_stats
         
         if sprint.estado.lower() in ("closed", "completado", "terminado"):
-            sprint_velocities.append(s_total_sp)
+            sprint_velocities.append(float(s_total_sp))
             
         avg_historical_velocity = sum(sprint_velocities) / len(sprint_velocities) if sprint_velocities else 0.0
         
-        sprint_kpi = db.query(models.KpisHistoricos).filter(
-            models.KpisHistoricos.id_proyecto == proyecto_id,
-            models.KpisHistoricos.id_sprint == sprint.id_sprint
-        ).first()
+        sprint_kpi = kpi_repo.get_sprint_kpi(db, proyecto_id, sprint.id_sprint)
+        
+        s_kpi_in = {
+            "id_proyecto": proyecto_id,
+            "id_sprint": sprint.id_sprint,
+            "velocity_total_sp": float(s_total_sp),
+            "velocity_promedio_historico": float(avg_historical_velocity),
+            "throughput_issues": int(s_throughput),
+            "lead_time_promedio_dias": float(s_avg_lead_time),
+            "cycle_time_promedio_dias": float(s_avg_cycle_time),
+            "fecha_calculo": now_utc
+        }
+
         
         if not sprint_kpi:
-            sprint_kpi = models.KpisHistoricos(
-                id_proyecto=proyecto_id,
-                id_sprint=sprint.id_sprint,
-                velocity_total_sp=s_total_sp,
-                velocity_promedio_historico=avg_historical_velocity,
-                throughput_issues=s_throughput,
-                lead_time_promedio_dias=s_avg_lead_time,
-                cycle_time_promedio_dias=s_avg_cycle_time,
-                fecha_calculo=now_utc
-            )
-            db.add(sprint_kpi)
+            kpi_repo.create(db, obj_in=s_kpi_in)
         else:
-            sprint_kpi.velocity_total_sp = s_total_sp
-            sprint_kpi.velocity_promedio_historico = avg_historical_velocity
-            sprint_kpi.throughput_issues = s_throughput
-            sprint_kpi.lead_time_promedio_dias = s_avg_lead_time
-            sprint_kpi.cycle_time_promedio_dias = s_avg_cycle_time
-            sprint_kpi.fecha_calculo = now_utc
+            kpi_repo.update(db, db_obj=sprint_kpi, obj_in=s_kpi_in)
             
-    db.commit()
     print(f"SUCCESS: KPIs calculated for project {proyecto_id}")
+

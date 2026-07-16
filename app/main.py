@@ -7,7 +7,8 @@ import app.models as models
 from app.api.v1.api import api_router
 
 # Crear tablas en la base de datos si no existen
-models.Base.metadata.create_all(bind=engine)
+# AHORA GESTIONADO POR ALEMBIC
+# models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="MCHAV Analytics API", description="API para la integración con Jira")
 

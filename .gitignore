@@ -1,0 +1,18 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.cache/
+
+# Environment variables
+.env
+
+# IDE settings
+.vscode/
+.idea/
+
+# Local databases
+*.db
+*.sqlite
