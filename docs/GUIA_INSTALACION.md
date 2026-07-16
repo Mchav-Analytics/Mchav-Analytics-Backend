@@ -93,7 +93,13 @@ Abre una terminal y ejecuta los siguientes comandos ordenadamente:
    DATABASE_URL=postgresql://postgres:TU_CONTRASEÑA_AQUI@localhost:5432/mchav_db
    ```
 
-5. **Levantar el Servidor Backend:**
+5. **Correr las Migraciones de la Base de Datos (Alembic):**
+   Para estructurar automáticamente las tablas relacionales y esquemas en tu PostgreSQL local, ejecuta en tu terminal con el entorno virtual activo:
+   ```bash
+   alembic upgrade head
+   ```
+
+6. **Levantar el Servidor Backend:**
    ```bash
    uvicorn app.main:app --reload
    ```
