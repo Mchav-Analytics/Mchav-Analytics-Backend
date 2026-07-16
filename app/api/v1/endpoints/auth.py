@@ -55,7 +55,7 @@ def login():
     state = secrets.token_urlsafe(16)
     oauth_states.add(state)
     
-    scopes = "read:jira-user read:jira-work offline_access"
+    scopes = "read:jira-user read:jira-work read:board-scope:jira-software read:sprint:jira-software offline_access"
     
     params = {
         "audience": "api.atlassian.com",
