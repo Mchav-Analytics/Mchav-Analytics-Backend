@@ -393,11 +393,8 @@ async def run_jira_sync(user_id: int, db: Session):
         try:
             sprint_field_id, sp_field_id = await get_jira_field_mappings(client, base_jira_url, headers, db, user)
             projects = await sync_projects(client, base_jira_url, headers, db, user)
-            # Intentar sincronización opcional de tableros ágiles (requiere scopes adicionales)
-            try:
-                await sync_sprints(client, agile_jira_url, headers, db, user, projects)
-            except Exception as agile_err:
-                print(f"[Warning] Sincronización ágil de tableros ignorada (puede ser falta de scopes): {agile_err}")
+            # Sincronización de sprints por API de Agile omitida para evitar errores 401 de scope.
+            # Los sprints se gestionan y crean dinámicamente a partir de los issues.
                 
             issues_processed = await sync_issues_and_transitions(
                 client, base_jira_url, headers, db, user, projects, sprint_field_id, sp_field_id
