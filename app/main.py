@@ -12,6 +12,24 @@ from app.api.v1.api import api_router
 
 app = FastAPI(title="MCHAV Analytics API", description="API para la integración con Jira")
 
+from app.core.database import SessionLocal
+from app.models import LogsSincronizacion
+
+@app.on_event("startup")
+def startup_event():
+    db = SessionLocal()
+    try:
+        # Limpiar cualquier log que haya quedado en estado RUNNING tras reiniciar el servidor
+        stuck_logs = db.query(LogsSincronizacion).filter(LogsSincronizacion.resultado == "RUNNING").all()
+        for log in stuck_logs:
+            log.resultado = "ERROR"
+            log.detalle_error = "La sincronización se interrumpió debido a un reinicio del servidor."
+        db.commit()
+    except Exception as e:
+        print(f"Error limpiando logs atascados en inicio: {e}")
+    finally:
+        db.close()
+
 # Configuración de CORS
 origins = [
     FRONTEND_URL,
