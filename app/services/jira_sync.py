@@ -207,13 +207,14 @@ async def sync_issues_and_transitions(
     total_processed = 0
     
     for project in projects:
-        start_at = 0
+        page_token = None
         max_results = 50
         
         while True:
             jql = f"project = '{project.key_proyecto}'"
             fields_to_request = f"summary,status,created,resolutiondate,key,{sprint_field_id},{sp_field_id}"
-            url = f"{base_url}/search/jql?jql={jql}&expand=changelog&startAt={start_at}&maxResults={max_results}&fields={fields_to_request}"
+            token_param = f"&nextPageToken={page_token}" if page_token else ""
+            url = f"{base_url}/search/jql?jql={jql}&expand=changelog&maxResults={max_results}&fields={fields_to_request}{token_param}"
             
             res = await jira_request(client, "GET", url, headers, db, user)
             if res.status_code != 200:
@@ -363,9 +364,11 @@ async def sync_issues_and_transitions(
                             
                 total_processed += 1
                 
-            if len(issues_list) < max_results:
+            is_last = search_data.get("isLast", True)
+            page_token = search_data.get("nextPageToken")
+            
+            if is_last or not page_token:
                 break
-            start_at += max_results
             await asyncio.sleep(0.3)  # Evitar saturar el API de Jira con peticiones continuas (429)
             
     return total_processed
@@ -384,6 +387,16 @@ async def run_jira_sync(user_id: int, db: Session):
         "Authorization": f"Bearer {user.access_token}",
         "Accept": "application/json"
     }
+    
+    # Crear de inmediato un registro de auditoría con estado RUNNING para evitar condiciones de carrera en el frontend
+    db_log = log_repo.create(db, obj_in={
+        "tipo_sincronizacion": "FULL_SYNC",
+        "resultado": "RUNNING",
+        "tiempo_ejecucion_segundos": 0,
+        "issues_procesados": 0,
+        "detalle_error": None,
+        "ejecutado_por": user.nombre or f"User {user.id_usuario}"
+    })
     
     issues_processed = 0
     resultado = "SUCCESS"
@@ -411,13 +424,12 @@ async def run_jira_sync(user_id: int, db: Session):
             
     elapsed_time = int(time.time() - start_time)
     
-    log_repo.create(db, obj_in={
-        "tipo_sincronizacion": "FULL_SYNC",
+    # Actualizar el registro de auditoría con el resultado final
+    log_repo.update(db, db_obj=db_log, obj_in={
         "resultado": resultado,
         "tiempo_ejecucion_segundos": elapsed_time,
         "issues_procesados": issues_processed,
-        "detalle_error": detalle_error[:2000] if detalle_error else None,
-        "ejecutado_por": user.nombre or f"User {user.id_usuario}"
+        "detalle_error": detalle_error[:2000] if detalle_error else None
     })
 
 async def run_jira_sync_task(user_id: int):
