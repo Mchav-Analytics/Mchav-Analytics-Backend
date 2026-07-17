@@ -94,7 +94,7 @@ async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
         "Accept": "application/json"
     }
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         try:
             # Hacemos las 4 peticiones en paralelo para mayor rapidez
             projects_req = client.get(f"{base_jira_url}/project", headers=headers)

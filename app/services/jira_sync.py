@@ -53,6 +53,11 @@ async def jira_request(client: httpx.AsyncClient, method: str, url: str, headers
             except ValueError:
                 delay = retry_delay * (1.5 ** attempt)
             
+            # Si el tiempo de espera sugerido es demasiado alto (más de 60 segundos), abortamos la petición
+            if delay > 60.0:
+                print(f"[Rate Limit] Atlassian sugirió una espera muy larga ({delay}s). Abortando petición de inmediato.")
+                return res
+            
             print(f"[Rate Limit] Atlassian nos limitó el flujo (429). Reintentando en {delay} segundos (Intento {attempt + 1}/{max_retries})...")
             await asyncio.sleep(delay)
             continue
@@ -259,13 +264,48 @@ async def sync_issues_and_transitions(
                     for s_raw in sprints_raw:
                         if isinstance(s_raw, dict):
                             s_id = str(s_raw.get("id"))
+                            # Si el sprint no existe en la base de datos, lo creamos dinámicamente con los datos devueltos en el issue
+                            sprint_exists = sprint_repo.get(db, s_id)
+                            if not sprint_exists:
+                                def parse_date(date_str):
+                                    if not date_str:
+                                        return None
+                                    clean_str = date_str.replace("Z", "+00:00")
+                                    if "+" in clean_str and len(clean_str.split("+")[-1]) == 4:
+                                        clean_str = clean_str[:-2] + ":" + clean_str[-2:]
+                                    try:
+                                        return datetime.fromisoformat(clean_str)
+                                    except ValueError:
+                                        return None
+                                        
+                                sprint_repo.create(db, obj_in={
+                                    "id_sprint": s_id,
+                                    "id_proyecto": project.id_proyecto,
+                                    "nombre": s_raw.get("name") or f"Sprint {s_id}",
+                                    "estado": s_raw.get("state") or "closed",
+                                    "fecha_inicio": parse_date(s_raw.get("startDate")),
+                                    "fecha_fin": parse_date(s_raw.get("endDate")),
+                                    "fecha_finalizacion": parse_date(s_raw.get("completeDate"))
+                                })
                             associated_sprint_ids.append(s_id)
                             if s_raw.get("state") == "active":
                                 active_sprint_id = s_id
                     if not active_sprint_id and associated_sprint_ids:
                         active_sprint_id = associated_sprint_ids[-1]
                 elif isinstance(sprints_raw, dict):
-                    active_sprint_id = str(sprints_raw.get("id"))
+                    s_id = str(sprints_raw.get("id"))
+                    sprint_exists = sprint_repo.get(db, s_id)
+                    if not sprint_exists:
+                        sprint_repo.create(db, obj_in={
+                            "id_sprint": s_id,
+                            "id_proyecto": project.id_proyecto,
+                            "nombre": sprints_raw.get("name") or f"Sprint {s_id}",
+                            "estado": sprints_raw.get("state") or "closed",
+                            "fecha_inicio": None,
+                            "fecha_fin": None,
+                            "fecha_finalizacion": None
+                        })
+                    active_sprint_id = s_id
                     associated_sprint_ids.append(active_sprint_id)
                 
                 if active_sprint_id:
@@ -349,11 +389,16 @@ async def run_jira_sync(user_id: int, db: Session):
     resultado = "SUCCESS"
     detalle_error = None
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         try:
             sprint_field_id, sp_field_id = await get_jira_field_mappings(client, base_jira_url, headers, db, user)
             projects = await sync_projects(client, base_jira_url, headers, db, user)
-            await sync_sprints(client, agile_jira_url, headers, db, user, projects)
+            # Intentar sincronización opcional de tableros ágiles (requiere scopes adicionales)
+            try:
+                await sync_sprints(client, agile_jira_url, headers, db, user, projects)
+            except Exception as agile_err:
+                print(f"[Warning] Sincronización ágil de tableros ignorada (puede ser falta de scopes): {agile_err}")
+                
             issues_processed = await sync_issues_and_transitions(
                 client, base_jira_url, headers, db, user, projects, sprint_field_id, sp_field_id
             )

@@ -55,7 +55,7 @@ def login():
     state = secrets.token_urlsafe(16)
     oauth_states.add(state)
     
-    scopes = "read:jira-user read:jira-work read:board-scope:jira-software read:sprint:jira-software offline_access"
+    scopes = "read:jira-user read:jira-work offline_access"
     
     params = {
         "audience": "api.atlassian.com",
@@ -88,7 +88,7 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
         "redirect_uri": CALLBACK_URL
     }
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         token_res = await client.post(TOKEN_URL, json=data)
         if token_res.status_code != 200:
             error_details = token_res.text
