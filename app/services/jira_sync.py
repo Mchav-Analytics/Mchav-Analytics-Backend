@@ -3,12 +3,57 @@ import time
 import traceback
 import httpx
 import asyncio
+import base64
 from datetime import datetime
 from sqlalchemy.orm import Session
 import app.models as models
 from app.core.database import SessionLocal
 from app.services.kpi import calculate_and_save_kpis
 from app.repositories import user_repo, project_repo, sprint_repo, issue_repo, transition_repo, log_repo
+from app.core.config import JIRA_DOMAIN, JIRA_EMAIL, JIRA_API_TOKEN
+
+def get_jira_auth_credentials(db: Session, user: models.User) -> tuple[str, dict]:
+    """
+    Retorna la URL base y los encabezados HTTP para la API de Jira.
+    Prioridad:
+    1. Credenciales de API Token vinculadas por el usuario (Basic Auth).
+    2. Credenciales por defecto configuradas en .env (Basic Auth).
+    3. Token de OAuth 2.0 de Atlassian (Bearer Token).
+    """
+    domain = None
+    email = None
+    token = None
+    
+    if user and user.api_token_vinculado and user.jira_domain and user.jira_email and user.jira_api_token:
+        domain = user.jira_domain.rstrip('/')
+        email = user.jira_email.strip()
+        token = user.jira_api_token.strip()
+    elif JIRA_DOMAIN and JIRA_EMAIL and JIRA_API_TOKEN:
+        domain = JIRA_DOMAIN.rstrip('/')
+        email = JIRA_EMAIL.strip()
+        token = JIRA_API_TOKEN.strip()
+        
+    if domain and email and token:
+        if not domain.startswith("http://") and not domain.startswith("https://"):
+            domain = f"https://{domain}"
+        credentials = f"{email}:{token}"
+        encoded_creds = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
+        base_url = f"{domain}/rest/api/3"
+        headers = {
+            "Authorization": f"Basic {encoded_creds}",
+            "Accept": "application/json"
+        }
+        return base_url, headers
+        
+    if user and user.cloud_id and user.access_token:
+        base_url = f"https://api.atlassian.com/ex/jira/{user.cloud_id}/rest/api/3"
+        headers = {
+            "Authorization": f"Bearer {user.access_token}",
+            "Accept": "application/json"
+        }
+        return base_url, headers
+        
+    raise Exception("No hay credenciales de Jira configuradas. Por favor vincula tu API Token de Jira en tu perfil o configura las variables en .env.")
 
 async def refresh_user_token(db: Session, user: models.User, client: httpx.AsyncClient):
     token_url = "https://auth.atlassian.com/oauth/token"
@@ -33,8 +78,8 @@ async def refresh_user_token(db: Session, user: models.User, client: httpx.Async
     })
 
 async def jira_request(client: httpx.AsyncClient, method: str, url: str, headers: dict, db: Session, user: models.User, **kwargs):
-    max_retries = 3
-    retry_delay = 15.0  # Incrementamos la base a 15 segundos para dar suficiente margen de recuperación
+    max_retries = 4
+    retry_delay = 10.0
     for attempt in range(max_retries + 1):
         res = await client.request(method, url, headers=headers, **kwargs)
         
@@ -50,15 +95,13 @@ async def jira_request(client: httpx.AsyncClient, method: str, url: str, headers
             retry_after = res.headers.get("Retry-After")
             try:
                 delay = float(retry_after) if retry_after else retry_delay * (1.5 ** attempt)
-            except ValueError:
+            except (ValueError, TypeError):
                 delay = retry_delay * (1.5 ** attempt)
             
-            # Si el tiempo de espera sugerido es demasiado alto (más de 60 segundos), abortamos la petición
-            if delay > 60.0:
-                print(f"[Rate Limit] Atlassian sugirió una espera muy larga ({delay}s). Abortando petición de inmediato.")
-                return res
+            # Limitar el tiempo máximo de espera por reintento a 30 segundos
+            delay = min(delay, 30.0)
             
-            print(f"[Rate Limit] Atlassian nos limitó el flujo (429). Reintentando en {delay} segundos (Intento {attempt + 1}/{max_retries})...")
+            print(f"[Rate Limit 429] Atlassian limitó el flujo de peticiones. Reintentando en {delay:.1f}s (Intento {attempt + 1}/{max_retries})...")
             await asyncio.sleep(delay)
             continue
             
@@ -68,6 +111,9 @@ async def get_jira_field_mappings(client: httpx.AsyncClient, base_url: str, head
     url = f"{base_url}/field"
     res = await jira_request(client, "GET", url, headers, db, user)
     if res.status_code != 200:
+        if res.status_code == 429:
+            print("[Rate Limit] Servidor limitado al consultar campos. Usando IDs por defecto.")
+            return "customfield_10020", "customfield_10016"
         raise Exception(f"Error al obtener campos de Jira: {res.text}")
         
     fields = res.json()
@@ -96,7 +142,11 @@ async def sync_projects(client: httpx.AsyncClient, base_url: str, headers: dict,
     url = f"{base_url}/project"
     res = await jira_request(client, "GET", url, headers, db, user)
     if res.status_code != 200:
-        raise Exception(f"Error al obtener proyectos de Jira: {res.text}")
+        local_projects = project_repo.get_multi(db)
+        if local_projects:
+            print(f"[Rate Limit / Error] No se pudo obtener la lista remota de proyectos de Jira ({res.status_code}). Usando {len(local_projects)} proyecto(s) local(es).")
+            return local_projects
+        raise Exception(f"Atlassian ha limitado temporalmente las peticiones (HTTP 429 Rate-Limit). Por favor espera un par de minutos antes de reintentar. Respuesta: {res.text}")
         
     projects_data = res.json()
     synced_projects = []
@@ -380,13 +430,7 @@ async def run_jira_sync(user_id: int, db: Session):
         print(f"Sync failed: User with ID {user_id} not found")
         return
         
-    base_jira_url = f"https://api.atlassian.com/ex/jira/{user.cloud_id}/rest/api/3"
-    agile_jira_url = f"https://api.atlassian.com/ex/jira/{user.cloud_id}/rest/agile/1.0"
-    
-    headers = {
-        "Authorization": f"Bearer {user.access_token}",
-        "Accept": "application/json"
-    }
+    base_jira_url, headers = get_jira_auth_credentials(db, user)
     
     # Crear de inmediato un registro de auditoría con estado RUNNING para evitar condiciones de carrera en el frontend
     db_log = log_repo.create(db, obj_in={

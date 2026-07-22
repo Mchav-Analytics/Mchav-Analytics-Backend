@@ -6,7 +6,7 @@ import httpx
 
 from app.core.database import get_db
 from app.core.security import verify_session_id
-from app.services.jira_sync import run_jira_sync_task
+from app.services.jira_sync import run_jira_sync_task, get_jira_auth_credentials
 from app.services.kpi import calculate_and_save_kpis
 import app.models as models
 from pydantic import BaseModel
@@ -82,17 +82,13 @@ async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
     user = check_user_exists(db, user_id)
     
-    # La llave de caché incluye el ID del usuario y cloud_id para evitar fugas de información
-    cache_key = f"metrics:{user.id_usuario}:{user.cloud_id}"
+    base_jira_url, headers = get_jira_auth_credentials(db, user)
+    
+    # La llave de caché incluye el ID del usuario para evitar fugas de información
+    cache_key = f"metrics:{user.id_usuario}"
     cached_data = metrics_cache.get(cache_key)
     if cached_data:
         return cached_data
-        
-    base_jira_url = f"https://api.atlassian.com/ex/jira/{user.cloud_id}/rest/api/3"
-    headers = {
-        "Authorization": f"Bearer {user.access_token}",
-        "Accept": "application/json"
-    }
     
     async with httpx.AsyncClient(timeout=60.0) as client:
         try:

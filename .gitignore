@@ -16,3 +16,6 @@ __pycache__/
 # Local databases
 *.db
 *.sqlite
+
+# Scratch scripts
+scratch/

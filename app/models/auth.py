@@ -30,6 +30,12 @@ class User(Base):
     # El cloudId del workspace de Jira al que el usuario tiene acceso
     cloud_id = Column(String(100), nullable=True)
     
+    # Credenciales de API Token de Jira para extracción directa (Basic Auth)
+    jira_domain = Column(String(255), nullable=True)
+    jira_email = Column(String(150), nullable=True)
+    jira_api_token = Column(Text, nullable=True)
+    api_token_vinculado = Column(Boolean, nullable=False, default=False)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
