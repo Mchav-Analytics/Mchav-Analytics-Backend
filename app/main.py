@@ -1,16 +1,47 @@
-import os
-from fastapi import FastAPI
+import secrets
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from app.core.config import FRONTEND_URL
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from fastapi.openapi.utils import get_openapi
+
+from app.core.config import FRONTEND_URL, DOCS_USER, DOCS_PASSWORD
 from app.core.database import engine
 import app.models as models
 from app.api.v1.api import api_router
 
-# Crear tablas en la base de datos si no existen
-# AHORA GESTIONADO POR ALEMBIC
-# models.Base.metadata.create_all(bind=engine)
+app = FastAPI(
+    title="MCHAV Analytics API",
+    description="API para la integración con Jira",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None
+)
 
-app = FastAPI(title="MCHAV Analytics API", description="API para la integración con Jira")
+security = HTTPBasic()
+
+def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(credentials.username, DOCS_USER)
+    correct_password = secrets.compare_digest(credentials.password, DOCS_PASSWORD)
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales de acceso a la documentación incorrectas",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
+@app.get("/docs", include_in_schema=False)
+async def get_documentation(username: str = Depends(get_current_username)):
+    return get_swagger_ui_html(openapi_url="/openapi.json", title="MCHAV Analytics API Docs")
+
+@app.get("/redoc", include_in_schema=False)
+async def get_redoc_documentation(username: str = Depends(get_current_username)):
+    return get_redoc_html(openapi_url="/openapi.json", title="MCHAV Analytics ReDoc")
+
+@app.get("/openapi.json", include_in_schema=False)
+async def openapi(username: str = Depends(get_current_username)):
+    return get_openapi(title=app.title, version="1.0.0", description=app.description, routes=app.routes)
 
 from app.core.database import SessionLocal
 from app.models import LogsSincronizacion

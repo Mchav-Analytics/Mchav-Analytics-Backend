@@ -14,3 +14,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 JIRA_DOMAIN = os.getenv("JIRA_DOMAIN", "").strip()
 JIRA_EMAIL = os.getenv("JIRA_EMAIL", "").strip()
 JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "").strip()
+
+# Credenciales de protección HTTP Basic Auth para la documentación (/docs)
+DOCS_USER = os.getenv("DOCS_USER", "admin").strip()
+DOCS_PASSWORD = os.getenv("DOCS_PASSWORD", "MchavDocs2026!Sec#Admin").strip()
