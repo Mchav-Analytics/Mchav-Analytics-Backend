@@ -76,26 +76,29 @@ async def sync_issues_for_project(
     db: Session, 
     project: models.Proyecto
 ):
-    """Sincroniza tickets, sprints completos (activos, futuros, cerrados) y transiciones."""
+    """Sincroniza tickets, sprints estrictos de este proyecto y sus transiciones."""
     jql = f"project = '{project.key_proyecto}' ORDER BY created ASC"
     start_at = 0
     max_results = 100
     total_processed = 0
     
-    # 1. Buscar tableros y extraer TODOS los Sprints (activos, futuros y cerrados)
+    # 1. Buscar tableros estrictos del proyecto y extraer sus Sprints
     try:
         boards_data = await JiraDatasource.fetch_boards_for_project(client, base_agile_url, headers, project.key_proyecto)
         boards = boards_data.get("values", [])
         
-        # Si no retornó por proyecto, intentar con id_board guardado en el modelo
-        board_id_saved = getattr(project, "id_board", None)
-        if not boards and board_id_saved:
-            boards = [{"id": board_id_saved}]
-
         for b in boards:
             b_id = b.get("id")
             if not b_id:
                 continue
+                
+            # Validar ubicación del tablero para no importar tableros de otros proyectos (ej: ASD vs MCHAV)
+            loc = b.get("location", {}) or {}
+            loc_key = loc.get("projectKey")
+            if loc_key and loc_key.upper() != project.key_proyecto.upper():
+                print(f"[Sync] Omitiendo tablero {b_id} ({b.get('name')}) porque pertenece a {loc_key} y no a {project.key_proyecto}")
+                continue
+
             sprints_data = await JiraDatasource.fetch_board_sprints(client, base_agile_url, headers, b_id)
             for spr in sprints_data.get("values", []):
                 sprint_id_str = str(spr.get("id"))
@@ -122,7 +125,7 @@ async def sync_issues_for_project(
                 }
                 if not existing_sprint:
                     sprint_repo.create(db, obj_in=s_data)
-                else:
+                elif existing_sprint.id_proyecto == project.id_proyecto:
                     sprint_repo.update(db, db_obj=existing_sprint, obj_in=s_data)
     except Exception as e:
         print(f"Advertencia obteniendo tableros y sprints para {project.key_proyecto}: {e}")
@@ -152,7 +155,7 @@ async def sync_issues_for_project(
             created_at = datetime.fromisoformat(created_str.replace("Z", "+00:00")) if created_str else datetime.utcnow()
             updated_at = datetime.fromisoformat(updated_str.replace("Z", "+00:00")) if updated_str else datetime.utcnow()
             
-            # Extraer TODOS los sprints asociados al ticket (históricos y activo)
+            # Extraer los sprints asociados a este ticket específico
             all_issue_sprints = []
             sprint_field = fields.get("sprint") or fields.get("customfield_10020")
             if sprint_field:
