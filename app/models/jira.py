@@ -17,6 +17,7 @@ class Proyecto(Base):
     key_proyecto = Column(String(20), unique=True, nullable=False)
     nombre = Column(String(100), nullable=False)
     estado = Column(String(50), default="Active")
+    id_board = Column(Integer, nullable=True)
 
     sprints = relationship("Sprint", back_populates="proyecto", cascade="all, delete-orphan")
     issues = relationship("Issue", back_populates="proyecto", cascade="all, delete-orphan")

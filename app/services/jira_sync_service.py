@@ -83,9 +83,10 @@ async def sync_issues_for_project(
     total_processed = 0
     
     # 1. Obtener Sprints del proyecto si hay tablero
-    if project.id_board:
+    board_id = getattr(project, "id_board", None)
+    if board_id:
         try:
-            sprints_data = await JiraDatasource.fetch_board_sprints(client, base_agile_url, headers, project.id_board)
+            sprints_data = await JiraDatasource.fetch_board_sprints(client, base_agile_url, headers, board_id)
             for spr in sprints_data.get("values", []):
                 sprint_id_str = str(spr.get("id"))
                 nombre = spr.get("name")
@@ -111,7 +112,7 @@ async def sync_issues_for_project(
                 else:
                     sprint_repo.update(db, db_obj=existing_sprint, obj_in=s_data)
         except Exception as e:
-            print(f"Advertencia obteniendo Sprints para tablero {project.id_board}: {e}")
+            print(f"Advertencia obteniendo Sprints para tablero {board_id}: {e}")
 
     while True:
         data = await JiraDatasource.fetch_issues_jql(
