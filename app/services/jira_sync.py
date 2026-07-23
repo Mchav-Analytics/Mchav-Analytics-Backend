@@ -1,7 +1,7 @@
-"""
-Modulo de sincronización de Jira. 
-Re-exporta el servicio principal jira_sync_service.py para asegurar compatibilidad total.
-"""
+# app/services/jira_sync.py
+# Módulo de compatibilidad y delegación para la sincronización de Jira.
+# Re-exporta las funciones principales de 'jira_sync_service.py' para evitar romper importaciones existentes.
+
 from app.services.jira_sync_service import (
     run_jira_sync,
     run_jira_sync_task,
@@ -11,6 +11,7 @@ from app.services.jira_sync_service import (
     refresh_user_token
 )
 
+# Exportar símbolos de la interfaz del servicio
 __all__ = [
     "run_jira_sync",
     "run_jira_sync_task",

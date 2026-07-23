@@ -1,3 +1,7 @@
+# app/services/jira_sync_service.py
+# Motor ETL (Extract, Transform, Load) completo para la sincronización asíncrona de datos desde Jira Cloud
+# Descarga proyectos, tableros, sprints, tickets y transiciones; gestiona logs de auditoría e invoca el cálculo de KPIs
+
 import os
 import re
 import time
@@ -14,11 +18,11 @@ from app.repositories import user_repo, project_repo, sprint_repo, issue_repo, t
 from app.datasources.jira_datasource import JiraDatasource
 
 def get_jira_auth_credentials(db: Session, user: models.User) -> tuple[str, dict]:
-    """Delegador hacia la fuente de datos JiraDatasource."""
+    """Delegador que obtiene la URL base y encabezados de autorización llamando a JiraDatasource."""
     return JiraDatasource.get_auth_credentials(db, user)
 
 async def refresh_user_token(db: Session, user: models.User, client: httpx.AsyncClient):
-    """Refresca el token OAuth de Atlassian si expiró."""
+    """Intercambia el refresh_token almacenado por un nuevo access_token cuando el previo expira."""
     token_url = "https://auth.atlassian.com/oauth/token"
     client_id = os.getenv("JIRA_CLIENT_ID", "").strip()
     client_secret = os.getenv("JIRA_CLIENT_SECRET", "").strip()
@@ -43,7 +47,10 @@ async def refresh_user_token(db: Session, user: models.User, client: httpx.Async
         print(f"[OAuth] Token actualizado para el usuario {user.id_usuario}")
 
 async def sync_projects(client: httpx.AsyncClient, base_jira_url: str, headers: dict, db: Session, user: models.User):
-    """Sincroniza la lista de proyectos desde JiraDatasource."""
+    """
+    EXTRACCIÓN Y CARGA DE PROYECTOS:
+    Consulta los proyectos visibles en Jira y actualiza la tabla 'proyectos' en la BD local.
+    """
     projects_data = await JiraDatasource.fetch_projects(client, base_jira_url, headers)
     
     synced_projects = []
@@ -76,13 +83,19 @@ async def sync_issues_for_project(
     db: Session, 
     project: models.Proyecto
 ):
-    """Sincroniza tickets, sprints estrictos de este proyecto y sus transiciones."""
+    """
+    EXTRACCIÓN Y CARGA DE SPRINTS, TICKETS Y HISTORIAL DE TRANSICIONES:
+    1. Filtra tableros pertenecientes estrictamente al proyecto (validación location.projectKey) para evitar fuga entre proyectos.
+    2. Descarga todos los Sprints (activos, futuros y cerrados) con sus fechas.
+    3. Descarga masiva de tickets mediante JQL paginado con expansión de changelog.
+    4. Persiste el historial inmutable de cambios de estado para cada ticket.
+    """
     jql = f"project = '{project.key_proyecto}' ORDER BY created ASC"
     start_at = 0
     max_results = 100
     total_processed = 0
     
-    # 1. Buscar tableros estrictos del proyecto y extraer sus Sprints
+    # 1. Obtener tableros y sprints del proyecto
     try:
         boards_data = await JiraDatasource.fetch_boards_for_project(client, base_agile_url, headers, project.key_proyecto)
         boards = boards_data.get("values", [])
@@ -92,7 +105,7 @@ async def sync_issues_for_project(
             if not b_id:
                 continue
                 
-            # Validar ubicación del tablero para no importar tableros de otros proyectos (ej: ASD vs MCHAV)
+            # Validar pertenencia del tablero
             loc = b.get("location", {}) or {}
             loc_key = loc.get("projectKey")
             if loc_key and loc_key.upper() != project.key_proyecto.upper():
@@ -130,7 +143,7 @@ async def sync_issues_for_project(
     except Exception as e:
         print(f"Advertencia obteniendo tableros y sprints para {project.key_proyecto}: {e}")
 
-    # 2. Descargar todos los tickets mediante JQL
+    # 2. Descargar tickets via JQL y cargarlos en BD
     while True:
         data = await JiraDatasource.fetch_issues_jql(
             client, base_jira_url, headers, jql, start_at=start_at, max_results=max_results
@@ -155,7 +168,7 @@ async def sync_issues_for_project(
             created_at = datetime.fromisoformat(created_str.replace("Z", "+00:00")) if created_str else datetime.utcnow()
             updated_at = datetime.fromisoformat(updated_str.replace("Z", "+00:00")) if updated_str else datetime.utcnow()
             
-            # Extraer los sprints asociados a este ticket específico
+            # Extraer Sprint(s) asignados al ticket
             all_issue_sprints = []
             sprint_field = fields.get("sprint") or fields.get("customfield_10020")
             if sprint_field:
@@ -213,7 +226,7 @@ async def sync_issues_for_project(
             else:
                 db_issue = issue_repo.update(db, db_obj=db_issue, obj_in=i_data)
                 
-            # Sincronizar Historial de Transiciones del Ticket
+            # Extraer e insertar el historial de cambios de estado (changelog)
             try:
                 changelog_data = issue_data.get("changelog", {}) or {}
                 histories = changelog_data.get("histories") or changelog_data.get("values")
@@ -252,8 +265,9 @@ async def sync_issues_for_project(
 
 def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
     """
-    Tarea de segundo plano (Background Task) que abre su propia conexión independiente a la Base de Datos.
-    Ejecuta el job completo de sincronización de Jira, calcula métricas y guarda logs inmutables.
+    Función de entrada para BackgroundTasks de FastAPI.
+    Abre una conexión independiente a la base de datos (SessionLocal), crea una entrada en logs_sincronizacion,
+    ejecuta la extracción asíncrona, recalcula los KPIs y marca el log como SUCCESS o ERROR registrando el traceback.
     """
     db = SessionLocal()
     log_entry = None
@@ -288,7 +302,7 @@ def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
                     count = await sync_issues_for_project(client, base_jira_url, base_agile_url, headers, db, project)
                     total_issues += count
                     
-                    # Calcular y actualizar KPIs
+                    # Calcular y guardar las agregaciones KPI para el proyecto
                     calculate_and_save_kpis(db, project.id_proyecto)
                     print(f"SUCCESS: KPIs calculados para el proyecto {project.id_proyecto}")
 
@@ -320,5 +334,5 @@ def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
         db.close()
 
 async def run_jira_sync(user_id: int, db: Session, tipo_sincronizacion: str = "MANUAL"):
-    """Sincronizador asíncrono directo (para invocaciones directas)."""
+    """Wrapper asíncrono para ejecutar la sincronización directamente."""
     run_jira_sync_task(user_id, tipo_sincronizacion)

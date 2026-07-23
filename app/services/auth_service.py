@@ -1,3 +1,6 @@
+# app/services/auth_service.py
+# Servicio de Lógica de Negocio para la Autenticación OAuth 2.0 y Verificación de Credenciales de Jira
+
 import secrets
 import asyncio
 import base64
@@ -13,29 +16,29 @@ from app.core.config import (
     JIRA_API_TOKEN
 )
 
-# URLs de la API de Atlassian
+# Constantes de los endpoints oficiales de Atlassian OAuth 2.0
 AUTHORIZATION_BASE_URL = "https://auth.atlassian.com/authorize"
 TOKEN_URL = "https://auth.atlassian.com/oauth/token"
 RESOURCES_URL = "https://api.atlassian.com/oauth/token/accessible-resources"
 
-# Estado temporal en memoria para protección CSRF OAuth
+# Estado temporal en memoria para la protección contra ataques de falsificación de peticiones (CSRF OAuth)
 _oauth_states = set()
 
 def generate_oauth_state() -> str:
-    """Genera y almacena un estado único para prevenir ataques CSRF en OAuth."""
+    """Genera y almacena en memoria un token de estado único para prevenir ataques CSRF en el flujo OAuth."""
     state = secrets.token_urlsafe(16)
     _oauth_states.add(state)
     return state
 
 def validate_oauth_state(state: str) -> bool:
-    """Valida y consume el estado único de la solicitud OAuth."""
+    """Valida que el estado recibido coincida con uno generado previamente y lo consume inmediatamente."""
     if state in _oauth_states:
         _oauth_states.remove(state)
         return True
     return False
 
 def build_jira_oauth_url(state: str) -> str:
-    """Construye la URL completa de autorización de Atlassian OAuth 2.0."""
+    """Construye la URL parametrizada de autorización hacia el servidor OAuth 2.0 de Atlassian."""
     if not CLIENT_ID:
         raise HTTPException(status_code=500, detail="JIRA_CLIENT_ID no está configurado en el sistema.")
 
@@ -54,8 +57,9 @@ def build_jira_oauth_url(state: str) -> str:
 
 async def exchange_code_for_user_profile(code: str) -> dict:
     """
-    Intercambia el código de autorización por Tokens y obtiene la información del usuario en Jira.
-    Incluye lógica de reintentos y fallback a credenciales directas por API Token si Atlassian limita peticiones (429).
+    Intercambia el código de autorización temporal por Tokens de acceso y refresco de Atlassian.
+    Obtiene el sitio (cloudId) accesible y consulta el perfil del usuario (myself).
+    Incluye lógica de reintentos ante Rate Limit (429) y fallback transparente a credenciales directas por API Token.
     """
     data = {
         "grant_type": "authorization_code",
@@ -66,6 +70,7 @@ async def exchange_code_for_user_profile(code: str) -> dict:
     }
 
     async with httpx.AsyncClient(timeout=60.0) as client:
+        # Peticion POST para canjear el código por tokens
         token_res = await client.post(TOKEN_URL, json=data)
         if token_res.status_code != 200:
             error_details = token_res.text
@@ -78,7 +83,7 @@ async def exchange_code_for_user_profile(code: str) -> dict:
         access_token = tokens.get("access_token")
         refresh_token = tokens.get("refresh_token")
 
-        # Obtener el cloudId del sitio de Jira accesible
+        # Obtener la lista de sitios de Jira accesibles asociados al token
         headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
         resources_res = await client.get(RESOURCES_URL, headers=headers)
 
@@ -92,9 +97,9 @@ async def exchange_code_for_user_profile(code: str) -> dict:
         if not resources:
             raise HTTPException(status_code=400, detail="El usuario no tiene acceso a ningún sitio de Jira")
 
-        cloud_id = resources[0]["id"]
+        cloud_id = resources[0]["id"] # Tomar el primer cloudId disponible
 
-        # Obtener datos del perfil de usuario (myself)
+        # Obtener el perfil del usuario autenticado (/myself)
         profile = await _fetch_user_profile_with_fallback(client, cloud_id, headers)
 
         return {
@@ -107,11 +112,11 @@ async def exchange_code_for_user_profile(code: str) -> dict:
         }
 
 async def _fetch_user_profile_with_fallback(client: httpx.AsyncClient, cloud_id: str, headers: dict) -> dict:
-    """Intenta obtener el perfil de Jira desde la API OAuth, con reintentos y fallback a API Token si ocurre un 429."""
-    profile = None
+    """Intenta consultar la API /myself con reintentos exponenciales. Si Atlassian responde 429 (Rate Limit), conmuta al API Token."""
     myself_url = f"https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/myself"
     myself_res = None
 
+    # Intentar hasta 3 veces con pausas si ocurre limitacion de frecuencia
     for attempt in range(3):
         myself_res = await client.get(myself_url, headers=headers)
         if myself_res.status_code == 200:
@@ -122,7 +127,7 @@ async def _fetch_user_profile_with_fallback(client: httpx.AsyncClient, cloud_id:
         else:
             break
 
-    # Fallback si el proxy OAuth 2.0 de Atlassian está limitado por Rate Limit
+    # Fallback automático usando API Token si está configurado en el sistema
     if JIRA_DOMAIN and JIRA_EMAIL and JIRA_API_TOKEN:
         print("[OAuth Callback] Atlassian OAuth Proxy limitado (429). Usando API Token fallback para obtener perfil...")
         creds = base64.b64encode(f"{JIRA_EMAIL}:{JIRA_API_TOKEN}".encode()).decode()
@@ -142,7 +147,7 @@ async def _fetch_user_profile_with_fallback(client: httpx.AsyncClient, cloud_id:
     )
 
 async def verify_jira_api_credentials(domain: str, email: str, token: str) -> dict:
-    """Valida la conectividad y credenciales de Jira mediante una llamada de prueba a /rest/api/3/myself."""
+    """Prueba la conectividad enviando una petición de verificación Basic Auth al endpoint /myself de Jira Cloud."""
     domain_clean = domain.strip().rstrip('/')
     if not domain_clean.startswith("http://") and not domain_clean.startswith("https://"):
         domain_clean = f"https://{domain_clean}"

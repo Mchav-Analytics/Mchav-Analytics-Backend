@@ -1,3 +1,7 @@
+# app/datasources/jira_datasource.py
+# Fuente de datos de bajo nivel para la comunicación HTTP asíncrona con la API REST v3 y API Agile 1.0 de Jira Cloud
+# Encapsula autenticación por credenciales directas (API Token Basic Auth) o tokens OAuth 2.0 (Bearer)
+
 import base64
 import os
 import httpx
@@ -13,11 +17,17 @@ class JiraDatasource:
 
     @staticmethod
     def get_auth_credentials(db: Session, user: models.User) -> tuple[str, dict]:
-        """Obtiene la URL base y los encabezados de autenticación para las peticiones HTTP a Jira."""
+        """
+        Determina de forma transparente el método de autenticación a utilizar:
+        1. Prioridad: Credenciales de API Token directo configuradas en el sistema / .env (Basic Auth).
+        2. Fallback: Token OAuth 2.0 de la sesión activa del usuario (Bearer Token).
+        Retorna la URL base y la cabecera (headers) HTTP correspondientes.
+        """
         domain = os.getenv("JIRA_DOMAIN", "").strip()
         email = os.getenv("JIRA_EMAIL", "").strip()
         api_token = os.getenv("JIRA_API_TOKEN", "").strip()
 
+        # 1. Intentar Basic Auth con API Token de administrador
         if domain and email and api_token:
             if not domain.startswith("http://") and not domain.startswith("https://"):
                 domain = f"https://{domain}"
@@ -30,6 +40,7 @@ class JiraDatasource:
             }
             return base_url, headers
 
+        # 2. Intentar Bearer Token con OAuth 2.0 de Atlassian
         if user and user.cloud_id and user.access_token:
             base_url = f"https://api.atlassian.com/ex/jira/{user.cloud_id}/rest/api/3"
             headers = {
@@ -42,7 +53,7 @@ class JiraDatasource:
 
     @staticmethod
     async def fetch_projects(client: httpx.AsyncClient, base_url: str, headers: Dict[str, str]) -> Any:
-        """Obtiene la lista completa de proyectos visibles en Jira."""
+        """Envía una petición GET al endpoint /project de Jira para obtener los proyectos accesibles."""
         res = await client.get(f"{base_url}/project", headers=headers)
         if res.status_code != 200:
             raise Exception(f"Error al obtener proyectos de Jira: {res.text}")
@@ -58,8 +69,11 @@ class JiraDatasource:
         max_results: int = 100
     ) -> Any:
         """
-        Realiza una consulta de tickets mediante JQL con expansión de historial (changelog).
-        Soporta migración Atlassian Change 2046 (/search/jql).
+        Ejecuta una consulta JQL parametrizada con expansión de historial de cambios (expand=changelog).
+        Implementa estrategia de 3 capas para compatibilidad total con Atlassian Change 2046:
+        1. GET /search/jql (Endpoint recomendado para nuevas versiones)
+        2. POST /search/jql (Payload estructurado)
+        3. GET /search (Endpoint legacy con fallback automático)
         """
         params = {
             "jql": jql,
@@ -100,7 +114,7 @@ class JiraDatasource:
         headers: Dict[str, str], 
         issue_id: str
     ) -> Any:
-        """Obtiene el historial completo de transiciones de un ticket."""
+        """Obtiene el registro extenso del historial de cambios (changelog) de un ticket por su ID."""
         res = await client.get(f"{base_url}/issue/{issue_id}/changelog", headers=headers)
         if res.status_code != 200:
             return {"values": []}
@@ -113,7 +127,7 @@ class JiraDatasource:
         headers: Dict[str, str], 
         project_key: str
     ) -> Any:
-        """Busca tableros asociados a un proyecto mediante la API Agile 1.0."""
+        """Consulta la API de Jira Agile 1.0 para encontrar los tableros asociados a una clave de proyecto."""
         res = await client.get(f"{base_agile_url}/board?projectKeyOrId={project_key}", headers=headers)
         if res.status_code != 200:
             return {"values": []}
@@ -126,7 +140,7 @@ class JiraDatasource:
         headers: Dict[str, str], 
         board_id: int
     ) -> Any:
-        """Obtiene TODOS los sprints (activos, futuros y cerrados) de un tablero."""
+        """Obtiene la totalidad de los sprints (activos, futuros y cerrados) pertenecientes a un tablero específico."""
         res = await client.get(f"{base_agile_url}/board/{board_id}/sprint?state=active,future,closed&maxResults=100", headers=headers)
         if res.status_code != 200:
             return {"values": []}

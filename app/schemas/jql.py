@@ -1,3 +1,6 @@
+# app/schemas/jql.py
+# Esquemas DTO de Pydantic para la representacion unificada de resultados de consultas JQL
+
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
