@@ -1,11 +1,12 @@
-from typing import Optional
+from typing import Optional, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, case
 from app.models.jira import Proyecto, Sprint, Issue, TransicionEstadoIssue, MapeoEstado
 from app.repositories.base import CRUDBase
 
 class CRUDProyecto(CRUDBase[Proyecto]):
-    pass
+    def get_by_key(self, db: Session, key: str) -> Optional[Proyecto]:
+        return db.query(Proyecto).filter(Proyecto.key_proyecto == key).first()
 
 class CRUDSprint(CRUDBase[Sprint]):
     def get_by_project(
@@ -30,12 +31,18 @@ class CRUDSprint(CRUDBase[Sprint]):
             query = query.limit(limit)
         return query.all()
 
+    def get_by_id_sprint(self, db: Session, sprint_id: str) -> Optional[Sprint]:
+        return db.query(Sprint).filter(Sprint.id_sprint == sprint_id).first()
+
 class CRUDIssue(CRUDBase[Issue]):
     def get_by_project(self, db: Session, project_id: str):
         return db.query(Issue).filter(Issue.id_proyecto == project_id).all()
         
     def get_by_sprint(self, db: Session, sprint_id: str):
         return db.query(Issue).filter(Issue.id_sprint == sprint_id).all()
+
+    def get_by_key(self, db: Session, issue_key: str) -> Optional[Issue]:
+        return db.query(Issue).filter(Issue.key_issue == issue_key).first()
 
     def get_distinct_statuses_by_project(self, db: Session, project_id: str):
         return db.query(Issue.status_actual).filter(Issue.id_proyecto == project_id).distinct().all()
@@ -109,6 +116,14 @@ class CRUDTransicion(CRUDBase[TransicionEstadoIssue]):
         db.query(TransicionEstadoIssue).filter(TransicionEstadoIssue.id_jira == issue_id).delete()
         db.commit()
         
+    def get_existing(self, db: Session, issue_id: str, fecha_cambio: Any, estado_origen: Optional[str], estado_destino: str):
+        return db.query(TransicionEstadoIssue).filter(
+            TransicionEstadoIssue.id_jira == issue_id,
+            TransicionEstadoIssue.fecha_cambio == fecha_cambio,
+            TransicionEstadoIssue.estado_anterior == estado_origen,
+            TransicionEstadoIssue.estado_nuevo == estado_destino
+        ).first()
+
     def get_distinct_new_statuses_by_project(self, db: Session, project_id: str):
         return db.query(TransicionEstadoIssue.estado_nuevo).join(Issue).filter(Issue.id_proyecto == project_id).distinct().all()
 

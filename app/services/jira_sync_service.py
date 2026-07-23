@@ -50,13 +50,14 @@ async def sync_projects(client: httpx.AsyncClient, base_jira_url: str, headers: 
     for proj in projects_data:
         key = proj.get("key")
         name = proj.get("name")
+        jira_id = str(proj.get("id"))
         
         project = project_repo.get_by_key(db, key)
         if not project:
             project = project_repo.create(db, obj_in={
+                "id_proyecto": jira_id,
                 "key_proyecto": key,
-                "nombre": name,
-                "id_usuario": user.id_usuario if user else 1
+                "nombre": name
             })
         else:
             project = project_repo.update(db, db_obj=project, obj_in={
@@ -122,25 +123,19 @@ async def sync_issues_for_project(
             break
             
         for issue_data in issues:
+            issue_id = str(issue_data.get("id"))
             issue_key = issue_data.get("key")
             fields = issue_data.get("fields", {})
             
             summary = fields.get("summary")
             status_obj = fields.get("status", {})
             estado = status_obj.get("name")
-            tipo_issue = fields.get("issuetype", {}).get("name")
             
             created_str = fields.get("created")
             updated_str = fields.get("updated")
             
             created_at = datetime.fromisoformat(created_str.replace("Z", "+00:00")) if created_str else datetime.utcnow()
             updated_at = datetime.fromisoformat(updated_str.replace("Z", "+00:00")) if updated_str else datetime.utcnow()
-            
-            assignee_obj = fields.get("assignee")
-            asignado_a = assignee_obj.get("displayName") if assignee_obj else None
-            
-            priority_obj = fields.get("priority")
-            prioridad = priority_obj.get("name") if priority_obj else None
             
             sprint_id = None
             sprint_field = fields.get("sprint") or fields.get("customfield_10020")
@@ -162,15 +157,13 @@ async def sync_issues_for_project(
 
             db_issue = issue_repo.get_by_key(db, issue_key)
             i_data = {
-                "key_ticket": issue_key,
+                "id_jira": issue_id,
+                "key_issue": issue_key,
                 "id_proyecto": project.id_proyecto,
-                "resumen": summary,
-                "estado": estado,
-                "tipo_issue": tipo_issue,
-                "asignado_a": asignado_a,
-                "prioridad": prioridad,
-                "fecha_creacion": created_at,
-                "fecha_fin": fecha_fin,
+                "summary": summary or "",
+                "status_actual": estado or "Unknown",
+                "created_at": created_at,
+                "resolved_at": fecha_fin,
                 "id_sprint": sprint_id
             }
             
@@ -193,13 +186,13 @@ async def sync_issues_for_project(
                             from_status = item.get("fromString")
                             to_status = item.get("toString")
                             
-                            existing_trans = transition_repo.get_existing(db, db_issue.id_ticket, t_date, from_status, to_status)
+                            existing_trans = transition_repo.get_existing(db, db_issue.id_jira, t_date, from_status, to_status)
                             if not existing_trans:
                                 transition_repo.create(db, obj_in={
-                                    "id_ticket": db_issue.id_ticket,
-                                    "estado_origen": from_status,
-                                    "estado_destino": to_status,
-                                    "fecha_transicion": t_date
+                                    "id_jira": db_issue.id_jira,
+                                    "estado_anterior": from_status,
+                                    "estado_nuevo": to_status,
+                                    "fecha_cambio": t_date
                                 })
             except Exception as e:
                 print(f"Error procesando historial para {issue_key}: {e}")
