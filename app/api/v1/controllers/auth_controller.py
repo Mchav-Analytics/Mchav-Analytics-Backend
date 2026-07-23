@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.config import FRONTEND_URL
@@ -8,13 +7,9 @@ from app.core.database import get_db
 from app.core.security import sign_session_id, verify_session_id
 from app.repositories import user_repo
 from app.services import auth_service
+from app.schemas.auth_schema import JiraCredentialsPayload, UserResponse, JiraCredentialsResponse
 
 router = APIRouter()
-
-class JiraCredentialsPayload(BaseModel):
-    jira_domain: str
-    jira_email: str
-    jira_api_token: str
 
 def _get_authenticated_user(request: Request, db: Session):
     """Helper interno para extraer y validar la sesión activa de las cookies."""
@@ -29,7 +24,7 @@ def _get_authenticated_user(request: Request, db: Session):
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
     return user
 
-@router.get("/me")
+@router.get("/me", response_model=UserResponse)
 async def get_current_user(request: Request, db: Session = Depends(get_db)):
     """Obtiene la información del usuario autenticado en la sesión actual."""
     user = _get_authenticated_user(request, db)
@@ -49,7 +44,7 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)):
         "api_token_vinculado": user.api_token_vinculado
     }
 
-@router.get("/jira-credentials")
+@router.get("/jira-credentials", response_model=JiraCredentialsResponse)
 async def get_jira_credentials(request: Request, db: Session = Depends(get_db)):
     """Obtiene el estado y dominio de vinculación de credenciales del usuario."""
     user = _get_authenticated_user(request, db)

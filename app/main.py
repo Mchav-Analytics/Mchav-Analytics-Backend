@@ -6,8 +6,9 @@ from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.openapi.utils import get_openapi
 
 from app.core.config import FRONTEND_URL, DOCS_USER, DOCS_PASSWORD
-from app.core.database import engine
+from app.core.database import engine, SessionLocal
 import app.models as models
+from app.models import LogsSincronizacion
 from app.api.v1.api import api_router
 
 app = FastAPI(
@@ -42,9 +43,6 @@ async def get_redoc_documentation(username: str = Depends(get_current_username))
 @app.get("/openapi.json", include_in_schema=False)
 async def openapi(username: str = Depends(get_current_username)):
     return get_openapi(title=app.title, version="1.0.0", description=app.description, routes=app.routes)
-
-from app.core.database import SessionLocal
-from app.models import LogsSincronizacion
 
 @app.on_event("startup")
 def startup_event():

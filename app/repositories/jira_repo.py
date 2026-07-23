@@ -1,5 +1,6 @@
 from typing import Optional
 from sqlalchemy.orm import Session
+from sqlalchemy import select, func, case
 from app.models.jira import Proyecto, Sprint, Issue, TransicionEstadoIssue, MapeoEstado
 from app.repositories.base import CRUDBase
 
@@ -29,7 +30,6 @@ class CRUDSprint(CRUDBase[Sprint]):
             query = query.limit(limit)
         return query.all()
 
-
 class CRUDIssue(CRUDBase[Issue]):
     def get_by_project(self, db: Session, project_id: str):
         return db.query(Issue).filter(Issue.id_proyecto == project_id).all()
@@ -42,9 +42,6 @@ class CRUDIssue(CRUDBase[Issue]):
 
     def get_resolved_stats_by_project(self, db: Session, project_id: str, in_progress_statuses: set[str]):
         dialect_name = db.bind.dialect.name
-        
-        from sqlalchemy import select, func, case
-        from app.models.jira import TransicionEstadoIssue
         
         first_progress_date_sub = select(
             func.min(TransicionEstadoIssue.fecha_cambio)
@@ -78,9 +75,6 @@ class CRUDIssue(CRUDBase[Issue]):
     def get_resolved_stats_by_sprint(self, db: Session, sprint_id: str, in_progress_statuses: set[str]):
         dialect_name = db.bind.dialect.name
         
-        from sqlalchemy import select, func, case
-        from app.models.jira import TransicionEstadoIssue
-        
         first_progress_date_sub = select(
             func.min(TransicionEstadoIssue.fecha_cambio)
         ).where(
@@ -109,7 +103,6 @@ class CRUDIssue(CRUDBase[Issue]):
             Issue.id_sprint == sprint_id,
             Issue.resolved_at.isnot(None)
         ).first()
-
 
 class CRUDTransicion(CRUDBase[TransicionEstadoIssue]):
     def delete_by_issue(self, db: Session, issue_id: str):
