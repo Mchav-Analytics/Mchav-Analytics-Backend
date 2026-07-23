@@ -76,17 +76,27 @@ async def sync_issues_for_project(
     db: Session, 
     project: models.Proyecto
 ):
-    """Sincroniza tickets, sprints y transiciones para un proyecto específico."""
+    """Sincroniza tickets, sprints completos (activos, futuros, cerrados) y transiciones."""
     jql = f"project = '{project.key_proyecto}' ORDER BY created ASC"
     start_at = 0
     max_results = 100
     total_processed = 0
     
-    # 1. Obtener Sprints del proyecto si hay tablero
-    board_id = getattr(project, "id_board", None)
-    if board_id:
-        try:
-            sprints_data = await JiraDatasource.fetch_board_sprints(client, base_agile_url, headers, board_id)
+    # 1. Buscar tableros y extraer TODOS los Sprints (activos, futuros y cerrados)
+    try:
+        boards_data = await JiraDatasource.fetch_boards_for_project(client, base_agile_url, headers, project.key_proyecto)
+        boards = boards_data.get("values", [])
+        
+        # Si no retornó por proyecto, intentar con id_board guardado en el modelo
+        board_id_saved = getattr(project, "id_board", None)
+        if not boards and board_id_saved:
+            boards = [{"id": board_id_saved}]
+
+        for b in boards:
+            b_id = b.get("id")
+            if not b_id:
+                continue
+            sprints_data = await JiraDatasource.fetch_board_sprints(client, base_agile_url, headers, b_id)
             for spr in sprints_data.get("values", []):
                 sprint_id_str = str(spr.get("id"))
                 nombre = spr.get("name")
@@ -94,9 +104,11 @@ async def sync_issues_for_project(
                 
                 f_inicio = spr.get("startDate")
                 f_fin = spr.get("endDate")
+                f_complete = spr.get("completeDate")
                 
                 dt_inicio = datetime.fromisoformat(f_inicio.replace("Z", "+00:00")) if f_inicio else None
                 dt_fin = datetime.fromisoformat(f_fin.replace("Z", "+00:00")) if f_fin else None
+                dt_complete = datetime.fromisoformat(f_complete.replace("Z", "+00:00")) if f_complete else None
                 
                 existing_sprint = sprint_repo.get_by_id_sprint(db, sprint_id_str)
                 s_data = {
@@ -105,15 +117,17 @@ async def sync_issues_for_project(
                     "nombre": nombre,
                     "estado": estado,
                     "fecha_inicio": dt_inicio,
-                    "fecha_fin": dt_fin
+                    "fecha_fin": dt_fin,
+                    "fecha_finalizacion": dt_complete
                 }
                 if not existing_sprint:
                     sprint_repo.create(db, obj_in=s_data)
                 else:
                     sprint_repo.update(db, db_obj=existing_sprint, obj_in=s_data)
-        except Exception as e:
-            print(f"Advertencia obteniendo Sprints para tablero {board_id}: {e}")
+    except Exception as e:
+        print(f"Advertencia obteniendo tableros y sprints para {project.key_proyecto}: {e}")
 
+    # 2. Descargar todos los tickets mediante JQL
     while True:
         data = await JiraDatasource.fetch_issues_jql(
             client, base_jira_url, headers, jql, start_at=start_at, max_results=max_results
@@ -138,34 +152,42 @@ async def sync_issues_for_project(
             created_at = datetime.fromisoformat(created_str.replace("Z", "+00:00")) if created_str else datetime.utcnow()
             updated_at = datetime.fromisoformat(updated_str.replace("Z", "+00:00")) if updated_str else datetime.utcnow()
             
-            sprint_id = None
+            # Extraer TODOS los sprints asociados al ticket (históricos y activo)
+            all_issue_sprints = []
             sprint_field = fields.get("sprint") or fields.get("customfield_10020")
             if sprint_field:
-                if isinstance(sprint_field, list) and len(sprint_field) > 0:
-                    last_sprint = sprint_field[-1]
-                    if isinstance(last_sprint, dict):
-                        sprint_id = str(last_sprint.get("id"))
-                    elif isinstance(last_sprint, str) and "id=" in last_sprint:
-                        m = re.search(r'id=(\d+)', last_sprint)
-                        if m:
-                            sprint_id = m.group(1)
-                elif isinstance(sprint_field, dict):
-                    sprint_id = str(sprint_field.get("id"))
-            
-            if sprint_id:
-                existing_sprint = sprint_repo.get_by_id_sprint(db, sprint_id)
-                if not existing_sprint:
-                    try:
-                        sprint_repo.create(db, obj_in={
-                            "id_sprint": sprint_id,
-                            "id_proyecto": project.id_proyecto,
-                            "nombre": f"Sprint {sprint_id}",
-                            "estado": "CLOSED"
-                        })
-                    except Exception as s_err:
-                        print(f"Advertencia autogenerando sprint {sprint_id}: {s_err}")
-                        db.rollback()
-                        sprint_id = None
+                sprint_list = sprint_field if isinstance(sprint_field, list) else [sprint_field]
+                for s_item in sprint_list:
+                    s_id = None
+                    s_name = None
+                    s_state = "CLOSED"
+                    if isinstance(s_item, dict):
+                        s_id = str(s_item.get("id"))
+                        s_name = s_item.get("name")
+                        s_state = s_item.get("state", "CLOSED")
+                    elif isinstance(s_item, str) and "id=" in s_item:
+                        m_id = re.search(r'id=(\d+)', s_item)
+                        if m_id:
+                            s_id = m_id.group(1)
+                        m_name = re.search(r'name=([^,]+)', s_item)
+                        if m_name:
+                            s_name = m_name.group(1)
+                    
+                    if s_id:
+                        all_issue_sprints.append(s_id)
+                        ex_sp = sprint_repo.get_by_id_sprint(db, s_id)
+                        if not ex_sp:
+                            try:
+                                sprint_repo.create(db, obj_in={
+                                    "id_sprint": s_id,
+                                    "id_proyecto": project.id_proyecto,
+                                    "nombre": s_name or f"Sprint {s_id}",
+                                    "estado": s_state
+                                })
+                            except Exception as sp_err:
+                                db.rollback()
+
+            sprint_id = all_issue_sprints[-1] if all_issue_sprints else None
 
             fecha_fin = None
             if status_obj.get("statusCategory", {}).get("key") == "done":
@@ -188,7 +210,7 @@ async def sync_issues_for_project(
             else:
                 db_issue = issue_repo.update(db, db_obj=db_issue, obj_in=i_data)
                 
-            # Sincronizar Historial de Transiciones del Ticket (vía changelog incrustado o API directa)
+            # Sincronizar Historial de Transiciones del Ticket
             try:
                 changelog_data = issue_data.get("changelog", {}) or {}
                 histories = changelog_data.get("histories") or changelog_data.get("values")

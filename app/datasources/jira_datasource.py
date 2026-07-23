@@ -107,14 +107,27 @@ class JiraDatasource:
         return res.json()
 
     @staticmethod
+    async def fetch_boards_for_project(
+        client: httpx.AsyncClient, 
+        base_agile_url: str, 
+        headers: Dict[str, str], 
+        project_key: str
+    ) -> Any:
+        """Busca tableros asociados a un proyecto mediante la API Agile 1.0."""
+        res = await client.get(f"{base_agile_url}/board?projectKeyOrId={project_key}", headers=headers)
+        if res.status_code != 200:
+            return {"values": []}
+        return res.json()
+
+    @staticmethod
     async def fetch_board_sprints(
         client: httpx.AsyncClient, 
         base_agile_url: str, 
         headers: Dict[str, str], 
         board_id: int
     ) -> Any:
-        """Obtiene los sprints de un tablero mediante la API Agile 1.0."""
-        res = await client.get(f"{base_agile_url}/board/{board_id}/sprint", headers=headers)
+        """Obtiene TODOS los sprints (activos, futuros y cerrados) de un tablero."""
+        res = await client.get(f"{base_agile_url}/board/{board_id}/sprint?state=active,future,closed&maxResults=100", headers=headers)
         if res.status_code != 200:
             return {"values": []}
         return res.json()
