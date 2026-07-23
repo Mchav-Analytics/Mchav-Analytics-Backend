@@ -26,7 +26,7 @@ SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "mchav_default_secret_key_1
 # URL del Frontend (React/Vite) permitida para políticas CORS
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").strip()
 
-DATABASE_URL = os.getenv("DATABASE_URL") or "postgresql://postgres:postgres@localhost:5432/mchav_db"
+DATABASE_URL = os.getenv("DATABASE_URL") or "sqlite:///./mchav.db"
 
 # -----------------------------------------------------------------------------
 # CREDENCIALES DE API TOKEN DE JIRA (FALLBACK DEL SISTEMA Y BASIC AUTH)
