@@ -152,6 +152,21 @@ async def sync_issues_for_project(
                 elif isinstance(sprint_field, dict):
                     sprint_id = str(sprint_field.get("id"))
             
+            if sprint_id:
+                existing_sprint = sprint_repo.get_by_id_sprint(db, sprint_id)
+                if not existing_sprint:
+                    try:
+                        sprint_repo.create(db, obj_in={
+                            "id_sprint": sprint_id,
+                            "id_proyecto": project.id_proyecto,
+                            "nombre": f"Sprint {sprint_id}",
+                            "estado": "CLOSED"
+                        })
+                    except Exception as s_err:
+                        print(f"Advertencia autogenerando sprint {sprint_id}: {s_err}")
+                        db.rollback()
+                        sprint_id = None
+
             fecha_fin = None
             if status_obj.get("statusCategory", {}).get("key") == "done":
                 fecha_fin = updated_at
@@ -263,6 +278,7 @@ def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
         print(f"[Sync Exitoso] Procesados {total_issues} tickets en {duration} segundos por {ejecutado_por}.")
 
     except Exception as e:
+        db.rollback()
         duration = int(time.time() - start_time)
         error_msg = str(e)
         traceback_str = traceback.format_exc()
