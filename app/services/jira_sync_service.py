@@ -50,7 +50,6 @@ async def sync_projects(client: httpx.AsyncClient, base_jira_url: str, headers: 
     for proj in projects_data:
         key = proj.get("key")
         name = proj.get("name")
-        jira_id = str(proj.get("id"))
         
         project = project_repo.get_by_key(db, key)
         if not project:
@@ -214,43 +213,49 @@ async def sync_issues_for_project(
 
     return total_processed
 
-async def run_jira_sync(user_id: int, db: Session, tipo_sincronizacion: str = "MANUAL"):
+def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
     """
-    Ejecuta el job completo de sincronización de Jira en segundo plano.
-    Calcula métricas y guarda logs inmutables en PostgreSQL.
+    Tarea de segundo plano (Background Task) que abre su propia conexión independiente a la Base de Datos.
+    Ejecuta el job completo de sincronización de Jira, calcula métricas y guarda logs inmutables.
     """
-    user = user_repo.get(db, user_id)
-    if not user:
-        print(f"Error en sincronización: Usuario {user_id} no encontrado.")
-        return
-
-    ejecutado_por = user.nombre or user.email or f"Usuario {user_id}"
-    log_entry = log_repo.create(db, obj_in={
-        "fecha_ejecucion": datetime.utcnow(),
-        "tipo_sincronizacion": tipo_sincronizacion,
-        "issues_procesados": 0,
-        "tiempo_ejecucion_segundos": 0,
-        "resultado": "RUNNING",
-        "ejecutado_por": ejecutado_por
-    })
-    
+    db = SessionLocal()
+    log_entry = None
     start_time = time.time()
     total_issues = 0
 
     try:
+        user = user_repo.get(db, user_id)
+        if not user:
+            print(f"[Sync Error] Usuario {user_id} no encontrado en base de datos.")
+            return
+
+        ejecutado_por = user.nombre or user.email or f"Usuario {user_id}"
+        log_entry = log_repo.create(db, obj_in={
+            "fecha_ejecucion": datetime.utcnow(),
+            "tipo_sincronizacion": tipo_sincronizacion,
+            "issues_procesados": 0,
+            "tiempo_ejecucion_segundos": 0,
+            "resultado": "RUNNING",
+            "ejecutado_por": ejecutado_por
+        })
+        
         base_jira_url, headers = get_jira_auth_credentials(db, user)
         base_agile_url = base_jira_url.replace("/rest/api/3", "/rest/agile/1.0")
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            projects = await sync_projects(client, base_jira_url, headers, db, user)
-            
-            for project in projects:
-                count = await sync_issues_for_project(client, base_jira_url, base_agile_url, headers, db, project)
-                total_issues += count
+        async def _async_sync():
+            nonlocal total_issues
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                projects = await sync_projects(client, base_jira_url, headers, db, user)
                 
-                # Calcular y actualizar KPIs
-                calculate_and_save_kpis(db, project.id_proyecto)
-                print(f"SUCCESS: KPIs calculados para el proyecto {project.id_proyecto}")
+                for project in projects:
+                    count = await sync_issues_for_project(client, base_jira_url, base_agile_url, headers, db, project)
+                    total_issues += count
+                    
+                    # Calcular y actualizar KPIs
+                    calculate_and_save_kpis(db, project.id_proyecto)
+                    print(f"SUCCESS: KPIs calculados para el proyecto {project.id_proyecto}")
+
+        asyncio.run(_async_sync())
 
         duration = int(time.time() - start_time)
         log_repo.update(db, db_obj=log_entry, obj_in={
@@ -264,11 +269,18 @@ async def run_jira_sync(user_id: int, db: Session, tipo_sincronizacion: str = "M
         duration = int(time.time() - start_time)
         error_msg = str(e)
         traceback_str = traceback.format_exc()
-        print(f"[Sync Error] Fallo la sincronización: {error_msg}\n{traceback_str}")
+        print(f"[Sync Error] Falló la sincronización: {error_msg}\n{traceback_str}")
 
-        log_repo.update(db, db_obj=log_entry, obj_in={
-            "issues_procesados": total_issues,
-            "tiempo_ejecucion_segundos": duration,
-            "resultado": "ERROR",
-            "detalle_error": f"{error_msg}\n{traceback_str[:300]}"
-        })
+        if log_entry:
+            log_repo.update(db, db_obj=log_entry, obj_in={
+                "issues_procesados": total_issues,
+                "tiempo_ejecucion_segundos": duration,
+                "resultado": "ERROR",
+                "detalle_error": f"{error_msg}\n{traceback_str[:300]}"
+            })
+    finally:
+        db.close()
+
+async def run_jira_sync(user_id: int, db: Session, tipo_sincronizacion: str = "MANUAL"):
+    """Sincronizador asíncrono directo (para invocaciones directas)."""
+    run_jira_sync_task(user_id, tipo_sincronizacion)

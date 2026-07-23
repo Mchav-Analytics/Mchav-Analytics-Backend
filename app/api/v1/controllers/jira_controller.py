@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.core.database import get_db
-from app.services.jira_sync import run_jira_sync, get_jira_auth_credentials
+from app.services.jira_sync import run_jira_sync_task, get_jira_auth_credentials
 from app.services.kpi import calculate_and_save_kpis
 import app.models as models
 from app.repositories import user_repo, project_repo, sprint_repo, issue_repo, transition_repo, log_repo
@@ -115,7 +115,7 @@ async def trigger_jira_sync(request: Request, background_tasks: BackgroundTasks,
     user_id = get_user_fn(request)
     user = check_user_fn(db, user_id)
         
-    background_tasks.add_task(run_jira_sync, user.id_usuario, db)
+    background_tasks.add_task(run_jira_sync_task, user.id_usuario)
     return {"message": "Sincronización iniciada en segundo plano"}
 
 @router.get(
