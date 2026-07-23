@@ -173,10 +173,13 @@ async def sync_issues_for_project(
             else:
                 db_issue = issue_repo.update(db, db_obj=db_issue, obj_in=i_data)
                 
-            # Sincronizar Historial de Transiciones del Ticket
+            # Sincronizar Historial de Transiciones del Ticket (vía changelog incrustado o API directa)
             try:
-                changelog = await JiraDatasource.fetch_issue_changelog(client, base_jira_url, headers, issue_key)
-                histories = changelog.get("values", [])
+                changelog_data = issue_data.get("changelog", {}) or {}
+                histories = changelog_data.get("histories") or changelog_data.get("values")
+                if histories is None:
+                    changelog = await JiraDatasource.fetch_issue_changelog(client, base_jira_url, headers, issue_key)
+                    histories = changelog.get("values", [])
                 
                 for history in histories:
                     created_t = history.get("created")

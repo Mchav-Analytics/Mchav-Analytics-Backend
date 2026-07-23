@@ -72,11 +72,12 @@ class JiraDatasource:
         start_at: int = 0, 
         max_results: int = 100
     ) -> Any:
-        """Realiza una consulta de tickets mediante JQL (Jira Query Language)."""
+        """Realiza una consulta de tickets mediante JQL con expansión de historial (changelog)."""
         params = {
             "jql": jql,
             "startAt": start_at,
             "maxResults": max_results,
+            "expand": "changelog",
             "fields": "summary,status,created,updated,issuetype,assignee,priority,sprint,customfield_10020"
         }
         res = await client.get(f"{base_url}/search", headers=headers, params=params)
