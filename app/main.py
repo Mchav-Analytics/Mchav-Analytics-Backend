@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.openapi.utils import get_openapi
+from sqlalchemy import text
 
 from app.core.config import FRONTEND_URL, DOCS_USER, DOCS_PASSWORD
 from app.core.database import engine, SessionLocal
@@ -46,6 +47,18 @@ async def openapi(username: str = Depends(get_current_username)):
 
 @app.on_event("startup")
 def startup_event():
+    # Auto-migrar esquema de la base de datos para la columna id_board en PostgreSQL y SQLite
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS id_board INTEGER;"))
+            conn.commit()
+        except Exception:
+            try:
+                conn.execute(text("ALTER TABLE proyectos ADD COLUMN id_board INTEGER;"))
+                conn.commit()
+            except Exception:
+                pass
+
     db = SessionLocal()
     try:
         # Limpiar cualquier log que haya quedado en estado RUNNING tras reiniciar el servidor
