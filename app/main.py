@@ -111,7 +111,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Registrar el router maestro con prefijo /api
+# Registrar el router maestro con los prefijos /api/v1 (Versión 1) y /api (compatibilidad)
+app.include_router(api_router, prefix="/api/v1")
 app.include_router(api_router, prefix="/api")
 
 @app.get("/")
