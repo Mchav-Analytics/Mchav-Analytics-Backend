@@ -71,10 +71,16 @@ async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
     
     async with httpx.AsyncClient(timeout=60.0) as client:
         try:
+            async def _search_jql(jql_query: str):
+                res = await client.get(f"{base_jira_url}/search/jql?jql={jql_query}&maxResults=0", headers=headers)
+                if res.status_code == 200:
+                    return res
+                return await client.get(f"{base_jira_url}/search?jql={jql_query}&maxResults=0", headers=headers)
+
             projects_req = client.get(f"{base_jira_url}/project", headers=headers)
-            done_req = client.get(f"{base_jira_url}/search?jql=statusCategory=Done&maxResults=0", headers=headers)
-            progress_req = client.get(f"{base_jira_url}/search?jql=statusCategory=\"In Progress\"&maxResults=0", headers=headers)
-            bugs_req = client.get(f"{base_jira_url}/search?jql=issuetype=Bug AND priority=Highest&maxResults=0", headers=headers)
+            done_req = _search_jql("statusCategory=Done")
+            progress_req = _search_jql("statusCategory=\"In Progress\"")
+            bugs_req = _search_jql("issuetype=Bug AND priority=Highest")
             
             projects_res, done_res, progress_res, bugs_res = await asyncio.gather(
                 projects_req, done_req, progress_req, bugs_req

@@ -1,42 +1,27 @@
 import base64
+import os
 import httpx
-from typing import Tuple, Dict, Any, Optional
+from typing import Any, Dict
 from sqlalchemy.orm import Session
-from app.core.config import JIRA_DOMAIN, JIRA_EMAIL, JIRA_API_TOKEN
 import app.models as models
 
 class JiraDatasource:
     """
-    Fuente de datos de bajo nivel para la comunicación HTTP con la API REST v3 y Agile v1 de Atlassian Jira.
-    Administra la autenticación dinámica (Basic Auth por API Token vs Bearer Token por OAuth 2.0).
+    Fuente de datos encargada de interactuar directamente con la API REST de Atlassian Jira.
+    Soporta autenticación mediante OAuth 2.0 (3LO) o API Token directo.
     """
 
     @staticmethod
-    def get_auth_credentials(db: Session, user: Optional[models.User]) -> Tuple[str, Dict[str, str]]:
-        """
-        Calcula y retorna la URL base y los encabezados HTTP para la API de Jira.
-        Prioridad:
-        1. Credenciales de API Token personalizadas por el usuario.
-        2. Credenciales por defecto del archivo .env.
-        3. Token OAuth 2.0 de Atlassian.
-        """
-        domain = None
-        email = None
-        token = None
+    def get_auth_credentials(db: Session, user: models.User) -> tuple[str, dict]:
+        """Obtiene la URL base y los encabezados de autenticación para las peticiones HTTP a Jira."""
+        domain = os.getenv("JIRA_DOMAIN", "").strip()
+        email = os.getenv("JIRA_EMAIL", "").strip()
+        api_token = os.getenv("JIRA_API_TOKEN", "").strip()
 
-        if user and user.api_token_vinculado and user.jira_domain and user.jira_email and user.jira_api_token:
-            domain = user.jira_domain.rstrip('/')
-            email = user.jira_email.strip()
-            token = user.jira_api_token.strip()
-        elif JIRA_DOMAIN and JIRA_EMAIL and JIRA_API_TOKEN:
-            domain = JIRA_DOMAIN.rstrip('/')
-            email = JIRA_EMAIL.strip()
-            token = JIRA_API_TOKEN.strip()
-
-        if domain and email and token:
+        if domain and email and api_token:
             if not domain.startswith("http://") and not domain.startswith("https://"):
                 domain = f"https://{domain}"
-            credentials = f"{email}:{token}"
+            credentials = f"{email}:{api_token}"
             encoded_creds = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
             base_url = f"{domain}/rest/api/3"
             headers = {
@@ -72,7 +57,10 @@ class JiraDatasource:
         start_at: int = 0, 
         max_results: int = 100
     ) -> Any:
-        """Realiza una consulta de tickets mediante JQL con expansión de historial (changelog)."""
+        """
+        Realiza una consulta de tickets mediante JQL con expansión de historial (changelog).
+        Soporta migración Atlassian Change 2046 (/search/jql).
+        """
         params = {
             "jql": jql,
             "startAt": start_at,
@@ -80,10 +68,30 @@ class JiraDatasource:
             "expand": "changelog",
             "fields": "summary,status,created,updated,issuetype,assignee,priority,sprint,customfield_10020"
         }
-        res = await client.get(f"{base_url}/search", headers=headers, params=params)
-        if res.status_code != 200:
-            raise Exception(f"Error al buscar issues con JQL '{jql}': {res.text}")
-        return res.json()
+        
+        # 1. Intentar con la nueva API recomendada /search/jql (GET)
+        res = await client.get(f"{base_url}/search/jql", headers=headers, params=params)
+        if res.status_code == 200:
+            return res.json()
+
+        # 2. Intentar POST /search/jql (Payload estándar de Atlassian)
+        payload = {
+            "jql": jql,
+            "startAt": start_at,
+            "maxResults": max_results,
+            "expand": ["changelog"],
+            "fields": ["summary", "status", "created", "updated", "issuetype", "assignee", "priority", "sprint", "customfield_10020"]
+        }
+        res_post = await client.post(f"{base_url}/search/jql", headers=headers, json=payload)
+        if res_post.status_code == 200:
+            return res_post.json()
+
+        # 3. Fallback al endpoint legacy /search
+        res_legacy = await client.get(f"{base_url}/search", headers=headers, params=params)
+        if res_legacy.status_code == 200:
+            return res_legacy.json()
+
+        raise Exception(f"Error al buscar issues con JQL '{jql}': {res.text} | {res_post.text}")
 
     @staticmethod
     async def fetch_issue_changelog(
@@ -105,7 +113,7 @@ class JiraDatasource:
         headers: Dict[str, str], 
         board_id: int
     ) -> Any:
-        """Obtiene los sprints asociados a un tablero Agile especifico."""
+        """Obtiene los sprints de un tablero mediante la API Agile 1.0."""
         res = await client.get(f"{base_agile_url}/board/{board_id}/sprint", headers=headers)
         if res.status_code != 200:
             return {"values": []}
