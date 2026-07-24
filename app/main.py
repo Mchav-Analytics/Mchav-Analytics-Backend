@@ -61,6 +61,15 @@ async def openapi(username: str = Depends(get_current_username)):
     """Ruta protegida que expone la especificación en formato JSON OpenAPI 3.0."""
     return get_openapi(title=app.title, version="1.0.0", description=app.description, routes=app.routes)
 
+@app.get("/docs/logout", include_in_schema=False)
+async def logout_documentation():
+    """Ruta para forzar el cierre de sesión de la documentación (limpia credenciales Basic Auth en navegador)."""
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Sesión de documentación cerrada con éxito",
+        headers={"WWW-Authenticate": "Basic realm='MCHAV Docs Logout'"},
+    )
+
 # -----------------------------------------------------------------------------
 # EVENTO DE INICIALIZACIÓN DE LA APLICACIÓN (STARTUP EVENT)
 # -----------------------------------------------------------------------------
