@@ -91,8 +91,8 @@ def login():
     return RedirectResponse(url=authorization_url)
 
 @router.get("/callback")
-async def callback(code: str, state: str, response: Response, db: Session = Depends(get_db)):
-    """Callback de OAuth 2.0 que procesa el código de Atlassian e inicia sesión."""
+async def callback(code: str, state: str, db: Session = Depends(get_db)):
+    """Callback de OAuth 2.0 que procesa el código de Atlassian, crea la cookie de sesión y redirige."""
     if not auth_service.validate_oauth_state(state):
         raise HTTPException(
             status_code=400, 
@@ -107,8 +107,13 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
     else:
         user = user_repo.update(db, db_obj=user, obj_in=u_data)
         
+    # 1. Creamos la redirección hacia el frontend
     redirect = RedirectResponse(url=f"{FRONTEND_URL}/dashboard?login=success")
+    
+    # 2. Firmamos el ID de usuario tal como lo espera 'verify_session_id' en security.py
     signed_session = sign_session_id(user.id_usuario)
+    
+    # 3. Inyectamos la cookie HTTP-Only en la respuesta de redirección
     redirect.set_cookie(
         key="session_id", 
         value=signed_session, 
@@ -116,4 +121,5 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
         samesite='lax', 
         max_age=3600*24
     )
+    
     return redirect

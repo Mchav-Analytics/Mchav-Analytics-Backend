@@ -6,11 +6,15 @@ import secrets
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from fastapi.openapi.docs import (
+    get_swagger_ui_html,
+    get_redoc_html,
+    get_swagger_ui_oauth2_redirect_html,  # NUEVO
+)
 from fastapi.openapi.utils import get_openapi
 from sqlalchemy import text
 
-from app.core.config import FRONTEND_URL, DOCS_USER, DOCS_PASSWORD
+from app.core.config import FRONTEND_URL, DOCS_USER, DOCS_PASSWORD, CLIENT_ID
 from app.core.database import engine, SessionLocal
 import app.models as models
 from app.models import LogsSincronizacion
@@ -22,7 +26,7 @@ app = FastAPI(
     description="API para la integración con Jira y cálculo de métricas ágiles",
     docs_url=None,       # Desactivar la ruta pública /docs por defecto
     redoc_url=None,      # Desactivar la ruta pública /redoc por defecto
-    openapi_url=None     # Desactivar el esquema público /openapi.json por defecto
+    openapi_url="/openapi.json"    # Desactivar el esquema público /openapi.json por defecto
 )
 
 # Instancia del esquema de seguridad HTTP Basic Auth para la documentación
@@ -49,7 +53,23 @@ def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
 @app.get("/docs", include_in_schema=False)
 async def get_documentation(username: str = Depends(get_current_username)):
     """Ruta protegida por contraseña para renderizar la interfaz gráfica de Swagger UI."""
-    return get_swagger_ui_html(openapi_url="/openapi.json", title="MCHAV Analytics API Docs")
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title="MCHAV Analytics API Docs",
+        oauth2_redirect_url="/docs/oauth2-redirect",
+        init_oauth={
+            "clientId": CLIENT_ID,
+            "appName": "MCHAV Analytics API",
+            "usePkceWithAuthorizationCodeGrant": False,
+        },
+    )
+
+# NUEVO: ruta que recibe el redirect de Atlassian cuando se usa el botón "Authorize" de Swagger.
+# Sin Depends(get_current_username): Atlassian redirige acá sin credenciales Basic Auth.
+@app.get("/docs/oauth2-redirect", include_in_schema=False)
+async def swagger_ui_redirect():
+    """Endpoint fijo requerido por Swagger UI para completar el flujo OAuth2 del botón Authorize."""
+    return get_swagger_ui_oauth2_redirect_html()
 
 @app.get("/redoc", include_in_schema=False)
 async def get_redoc_documentation(username: str = Depends(get_current_username)):
@@ -82,8 +102,18 @@ def startup_event():
                 conn.commit()
             except Exception:
                 pass
-
-    # 2. Limpieza de logs incompletos
+    # 2. Migración liviana: columna 'scopes' en la tabla 'roles'
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE roles ADD COLUMN IF NOT EXISTS scopes VARCHAR(500) DEFAULT '';"))
+            conn.commit()
+        except Exception:
+            try:
+                conn.execute(text("ALTER TABLE roles ADD COLUMN scopes VARCHAR(500) DEFAULT '';"))
+                conn.commit()
+            except Exception:
+                pass
+    # . Limpieza de logs incompletos
     db = SessionLocal()
     try:
         stuck_logs = db.query(LogsSincronizacion).filter(LogsSincronizacion.resultado == "RUNNING").all()
@@ -113,7 +143,6 @@ app.add_middleware(
 
 # Registrar el router maestro con los prefijos /api/v1 (Versión 1) y /api (compatibilidad)
 app.include_router(api_router, prefix="/api/v1")
-app.include_router(api_router, prefix="/api")
 
 @app.get("/")
 def read_root():

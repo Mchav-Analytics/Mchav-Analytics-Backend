@@ -6,7 +6,7 @@ import asyncio
 import httpx
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks, Security
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -16,7 +16,8 @@ from app.services.kpi import calculate_and_save_kpis
 import app.models as models
 from app.repositories import user_repo, project_repo, sprint_repo, issue_repo, transition_repo, log_repo
 from app.core.cache import ShortLivedCache
-from app.api.v1 import deps
+from app.core.security import get_current_user
+from app.models.auth import User
 
 # Instancia global de la caché en memoria de 60 segundos
 metrics_cache = ShortLivedCache(ttl_seconds=60)
@@ -52,16 +53,15 @@ class WebhookResponse(BaseModel):
 # Router principal del controlador de Jira
 router = APIRouter()
 
-def _get_jira_module():
-    """Helper interno de resolución dinámica de módulos para compatibilidad con la suite de pruebas."""
-    return sys.modules.get('app.api.v1.endpoints.jira')
-
 @router.get(
     "/metrics", 
     response_model=JiraMetricsResponse,
     summary="Obtener métricas rápidas con JQL"
 )
-async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
+async def get_jira_metrics(
+    db: Session = Depends(get_db),
+    current_user: User = Security(get_current_user, scopes=["jira:read"])
+):
     """
     GET /api/jira/metrics
     Consulta en paralelo 4 métricas clave directo a la API REST de Jira (con caché en memoria):
@@ -70,19 +70,11 @@ async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
     3. Total de tickets en desarrollo (In Progress)
     4. Bugs críticos con prioridad alta
     """
-    mod = _get_jira_module()
-    get_user_fn = getattr(mod, 'get_current_user_id', deps.get_current_user_id) if mod else deps.get_current_user_id
-    check_user_fn = getattr(mod, 'check_user_exists', deps.check_user_exists) if mod else deps.check_user_exists
-    active_cache = getattr(mod, 'metrics_cache', metrics_cache) if mod else metrics_cache
-
-    user_id = get_user_fn(request)
-    user = check_user_fn(db, user_id)
-    
-    base_jira_url, headers = get_jira_auth_credentials(db, user)
-    cache_key = f"metrics:{user.id_usuario}"
+    base_jira_url, headers = get_jira_auth_credentials(db, current_user)
+    cache_key = f"metrics:{current_user.id_usuario}"
     
     # 1. Verificar si existen métricas cacheadas no expiradas
-    cached_data = active_cache.get(cache_key)
+    cached_data = metrics_cache.get(cache_key)
     if cached_data:
         return cached_data
     
@@ -120,7 +112,7 @@ async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
             }
             
             # Guardar en caché por 60 segundos
-            active_cache.set(cache_key, result_data)
+            metrics_cache.set(cache_key, result_data)
             return result_data
         except Exception as e:
             if isinstance(e, HTTPException):
@@ -132,20 +124,17 @@ async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
     response_model=SyncMessageResponse,
     summary="Ejecutar motor ETL de Sincronización"
 )
-async def trigger_jira_sync(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def trigger_jira_sync(
+    background_tasks: BackgroundTasks, 
+    db: Session = Depends(get_db),
+    current_user: User = Security(get_current_user, scopes=["jira:sync"])
+):
     """
     POST /api/jira/sync
     Lanza el proceso de sincronización completa ETL como una tarea en segundo plano (BackgroundTask) no bloqueante.
     """
-    mod = _get_jira_module()
-    get_user_fn = getattr(mod, 'get_current_user_id', deps.get_current_user_id) if mod else deps.get_current_user_id
-    check_user_fn = getattr(mod, 'check_user_exists', deps.check_user_exists) if mod else deps.check_user_exists
-
-    user_id = get_user_fn(request)
-    user = check_user_fn(db, user_id)
-        
     # Encolar la tarea asíncrona de sincronización
-    background_tasks.add_task(run_jira_sync_task, user.id_usuario)
+    background_tasks.add_task(run_jira_sync_task, current_user.id_usuario)
     return {"message": "Sincronización iniciada en segundo plano"}
 
 @router.get(
@@ -154,24 +143,16 @@ async def trigger_jira_sync(request: Request, background_tasks: BackgroundTasks,
     summary="Obtener historial de Sincronizaciones (Auditoría ETL)"
 )
 async def get_sync_logs(
-    request: Request,
     limit: int = 20,
     offset: int = 0,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
     """
     GET /api/jira/sync/logs
     Obtiene los registros de auditoría de sincronizaciones anteriores con paginación.
     """
-    mod = _get_jira_module()
-    get_user_fn = getattr(mod, 'get_current_user_id', deps.get_current_user_id) if mod else deps.get_current_user_id
-    check_user_fn = getattr(mod, 'check_user_exists', deps.check_user_exists) if mod else deps.check_user_exists
-    active_log_repo = getattr(mod, 'log_repo', log_repo) if mod else log_repo
-
-    user_id = get_user_fn(request)
-    check_user_fn(db, user_id)
-        
-    logs = active_log_repo.get_recent(db, skip=offset, limit=limit)
+    logs = log_repo.get_recent(db, skip=offset, limit=limit)
     return logs
 
 @router.post(

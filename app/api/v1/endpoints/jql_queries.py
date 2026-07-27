@@ -1,7 +1,14 @@
-from fastapi import APIRouter
+# app/api/v1/controllers/jql_controller.py
+# Controlador HTTP para consultas avanzadas JQL especializadas (Deltas, Velocidad, Throughput y Tiempos de Ciclo)
+
+from fastapi import APIRouter, Depends, Security
 from datetime import datetime, timezone
 from typing import List
+from sqlalchemy.orm import Session
 
+from app.core.database import get_db
+from app.core.security import get_current_user
+from app.models.auth import User
 from app.schemas.jql import JQLQueryResponse, MetricSummarySchema, IssueBasicSchema
 from app.core.jql_config import JQLQueries
 
@@ -18,7 +25,11 @@ router = APIRouter()
     Evita tener que re-sincronizar toda la historia de Jira, optimizando recursos y tiempos de cálculo.
     """
 )
-async def get_extraction_delta(project_key: str):
+async def get_extraction_delta(
+    project_key: str,
+    db: Session = Depends(get_db),
+    current_user: User = Security(get_current_user, scopes=["jira:read"])
+):
     jql = JQLQueries.DELTA_EXTRACTION.format(project_key=project_key)
     
     return JQLQueryResponse(
@@ -38,7 +49,13 @@ async def get_extraction_delta(project_key: str):
     y contabilizar el volumen neto de filas o tickets entregados (Throughput). 
     """
 )
-async def get_velocity_throughput(project_key: str, status_done: str, sprint_id: int):
+async def get_velocity_throughput(
+    project_key: str, 
+    status_done: str, 
+    sprint_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Security(get_current_user, scopes=["jira:read"])
+):
     jql = JQLQueries.VELOCITY_THROUGHPUT.format(
         project_key=project_key, 
         status_done=status_done, 
@@ -61,7 +78,13 @@ async def get_velocity_throughput(project_key: str, status_done: str, sprint_id:
     Extrae ítems resueltos en un rango de fechas determinado para mapear el ciclo de vida y pre-computar promedios en días hábiles.
     """
 )
-async def get_time_cycles(project_key: str, start_date: str, end_date: str):
+async def get_time_cycles(
+    project_key: str, 
+    start_date: str, 
+    end_date: str,
+    db: Session = Depends(get_db),
+    current_user: User = Security(get_current_user, scopes=["jira:read"])
+):
     jql = JQLQueries.TIME_CYCLES.format(
         project_key=project_key, 
         start_date=start_date, 

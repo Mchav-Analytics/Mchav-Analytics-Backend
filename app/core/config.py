@@ -41,6 +41,13 @@ JIRA_EMAIL = os.getenv("JIRA_EMAIL", "").strip()
 JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "").strip()
 
 # -----------------------------------------------------------------------------
+# SESIÓN Y COOKIES DE AUTENTICACIÓN DE USUARIO
+# -----------------------------------------------------------------------------
+# Nombre de la cookie HTTP-Only donde se almacena el ID de usuario firmado (HMAC).
+# DEBE coincidir con el nombre usado en response.set_cookie(...) al hacer login.
+SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "session_id").strip()
+
+# -----------------------------------------------------------------------------
 # SEGURIDAD Y PROTECCIÓN DE LA DOCUMENTACIÓN OPENAPI / SWAGGER (/docs)
 # -----------------------------------------------------------------------------
 # Usuario para acceder a la documentación interactiva Swagger/ReDoc
