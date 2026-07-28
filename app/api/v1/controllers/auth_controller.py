@@ -3,27 +3,29 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security
 from fastapi.responses import RedirectResponse
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.core.config import FRONTEND_URL
 from app.core.database import get_db
-from app.core.security import sign_session_id, get_current_user
+from app.core.security import sign_session_id, get_current_user, verify_password
 from app.repositories import user_repo
 from app.services import auth_service
 from app.schemas.auth_schema import JiraCredentialsPayload, UserResponse, JiraCredentialsResponse
-from app.models.auth import User
+from app.models.auth import User, Role
 
 # Instanciar el sub-router para los endpoints de autenticación
 router = APIRouter()
 
-@router.get("/me", response_model=UserResponse)
+@router.get(
+    "/me", 
+    response_model=UserResponse,
+    summary="Obtener usuario actual",
+    description="Devuelve la información detallada del perfil, roles y estados de vinculación de Jira del usuario autenticado en la sesión actual o mediante un Bearer Token."
+)
 async def get_current_user_info(
     current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
-    """
-    GET /api/auth/me
-    Devuelve la información detallada del perfil del usuario autenticado exigiendo el scope 'jira:read'.
-    """
     rol_nombre = current_user.rol.nombre_rol if current_user.rol else None
     
     return {
@@ -40,14 +42,15 @@ async def get_current_user_info(
         "api_token_vinculado": current_user.api_token_vinculado
     }
 
-@router.get("/jira-credentials", response_model=JiraCredentialsResponse)
+@router.get(
+    "/jira-credentials", 
+    response_model=JiraCredentialsResponse,
+    summary="Consultar estado de credenciales de Jira",
+    description="Retorna el dominio configurado, el correo electrónico y verifica si el usuario posee un API Token personal vinculado en el sistema."
+)
 async def get_jira_credentials(
     current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
-    """
-    GET /api/auth/jira-credentials
-    Obtiene el estado actual y dominio de la vinculación del API Token del usuario.
-    """
     return {
         "jira_domain": current_user.jira_domain or "",
         "jira_email": current_user.jira_email or current_user.email or "",
@@ -55,24 +58,22 @@ async def get_jira_credentials(
         "has_token": bool(current_user.jira_api_token)
     }
 
-@router.post("/jira-credentials")
+@router.post(
+    "/jira-credentials",
+    summary="Guardar y verificar credenciales de Jira",
+    description="Prueba la conectividad contra la API de Jira utilizando el dominio, email y API Token provistos por el usuario, almacenándolos de forma segura si la validación es exitosa."
+)
 async def save_jira_credentials(
     payload: JiraCredentialsPayload, 
     db: Session = Depends(get_db),
     current_user: User = Security(get_current_user, scopes=["jira:sync"])
 ):
-    """
-    POST /api/auth/jira-credentials
-    Prueba la conectividad con el servidor de Jira enviado y guarda el API Token verificado.
-    """
-    # Probar conectividad enviando peticion de prueba a /myself
     verified_data = await auth_service.verify_jira_api_credentials(
         domain=payload.jira_domain,
         email=payload.jira_email,
         token=payload.jira_api_token
     )
     
-    # Persistir credenciales verificadas en base de datos
     user_repo.update(db, db_obj=current_user, obj_in={
         "jira_domain": verified_data["jira_domain"],
         "jira_email": verified_data["jira_email"],
@@ -85,17 +86,21 @@ async def save_jira_credentials(
         "message": "Credenciales de API Token de Jira vinculadas y verificadas con éxito."
     }
 
-@router.get("/login")
+@router.get(
+    "/login",
+    summary="Iniciar sesión con Atlassian",
+    description="Genera un token de estado CSRF único y redirige al usuario al servidor de autorización OAuth 2.0 de Atlassian."
+)
 def login():
-    """
-    GET /api/auth/login
-    Genera un token de estado CSRF y redirige al usuario a la pantalla de autorización OAuth 2.0 de Atlassian.
-    """
     state = auth_service.generate_oauth_state()
     authorization_url = auth_service.build_jira_oauth_url(state)
     return RedirectResponse(url=authorization_url)
 
-@router.get("/callback")
+@router.get(
+    "/callback",
+    summary="Callback de autenticación OAuth 2.0",
+    description="Endpoint de retorno configurado en Atlassian. Valida el estado CSRF, intercambia el código por el perfil del usuario y establece la sesión."
+)
 async def callback(code: str, state: str, response: Response, db: Session = Depends(get_db)):
     if not auth_service.validate_oauth_state(state):
         raise HTTPException(
@@ -114,20 +119,38 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
     else:
         user = user_repo.update(db, db_obj=user, obj_in=u_data)
 
-    # Generar el token firmado con el ID real del usuario de la BD
     signed_session = sign_session_id(user.id_usuario)
 
-    # Redirigir al dashboard del frontend limpio
     redirect = RedirectResponse(url=f"{FRONTEND_URL}/dashboard", status_code=307)
-    
-    # Asignar la cookie HTTP-Only de manera segura directamente en la respuesta
     redirect.set_cookie(
         key="session_id",
         value=signed_session,
         httponly=True,
-        secure=False,  # Ponlo en True si usas HTTPS en producción
+        secure=False,
         samesite="lax",
         path="/"
     )
     
     return redirect
+
+@router.post(
+    "/token",
+    summary="Iniciar sesión local (Bearer Token)",
+    description="Login local con usuario y contraseña para entorno de pruebas y Swagger UI."
+)
+async def login_local(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.email == form_data.username, User.activo.is_(True)).first()
+
+    if not user or not user.password_hash or not verify_password(form_data.password, user.password_hash):
+        raise HTTPException(
+            status_code=401,
+            detail="Usuario o contraseña incorrectos",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    signed_session = sign_session_id(user.id_usuario)
+
+    return {"access_token": signed_session, "token_type": "bearer"}

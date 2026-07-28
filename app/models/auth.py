@@ -55,6 +55,10 @@ class User(Base):
     # Estado del usuario (True: Activo, False: Inactivo/Bloqueado)
     activo = Column(Boolean, nullable=False, default=True)
 
+    # NUEVO: hash de contraseña (bcrypt) para login local vía Password Flow.
+    # Nullable porque los usuarios creados vía OAuth de Atlassian no la usan.
+    password_hash = Column(String(255), nullable=True)
+    
     # Identificador único de cuenta de Jira Atlassian (AccountId)
     jira_account_id = Column(String(100), unique=True, index=True, nullable=True)
     
