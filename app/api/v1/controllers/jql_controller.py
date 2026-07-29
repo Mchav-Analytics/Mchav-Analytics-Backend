@@ -1,3 +1,6 @@
+# app/api/v1/controllers/jql_controller.py
+# Controlador HTTP para ejecutar consultas JQL parametrizadas contra Jira
+
 from fastapi import APIRouter
 from datetime import datetime, timezone
 from typing import List
@@ -5,6 +8,7 @@ from typing import List
 from app.schemas.jql import JQLQueryResponse, MetricSummarySchema, IssueBasicSchema
 from app.core.jql_config import JQLQueries
 
+# Router principal para los endpoints de consultas JQL
 router = APIRouter()
 
 @router.get(
@@ -19,6 +23,7 @@ router = APIRouter()
     """
 )
 async def get_extraction_delta(project_key: str):
+    """Genera y ejecuta la consulta JQL de extracción delta (-24h) para un proyecto."""
     jql = JQLQueries.DELTA_EXTRACTION.format(project_key=project_key)
     
     return JQLQueryResponse(
@@ -39,6 +44,7 @@ async def get_extraction_delta(project_key: str):
     """
 )
 async def get_velocity_throughput(project_key: str, status_done: str, sprint_id: int):
+    """Genera la consulta JQL parametrizada para obtener Velocity y Throughput de un sprint."""
     jql = JQLQueries.VELOCITY_THROUGHPUT.format(
         project_key=project_key, 
         status_done=status_done, 
@@ -62,6 +68,7 @@ async def get_velocity_throughput(project_key: str, status_done: str, sprint_id:
     """
 )
 async def get_time_cycles(project_key: str, start_date: str, end_date: str):
+    """Genera la consulta JQL parametrizada para obtener los tickets resueltos en un rango de fechas."""
     jql = JQLQueries.TIME_CYCLES.format(
         project_key=project_key, 
         start_date=start_date, 

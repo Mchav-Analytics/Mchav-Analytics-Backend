@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+from datetime import datetime
 from fastapi.testclient import TestClient
 import pytest
 from app.main import app
@@ -8,14 +9,14 @@ client = TestClient(app)
 def test_get_project_kpis_unauthorized():
     """Verifica que si no hay una cookie de sesión válida se retorne 401."""
     # Hacemos petición sin cookies
-    response = client.get("/api/projects/PROJ-1/kpis")
+    response = client.get("/api/v1/projects/PROJ-1/kpis")
     assert response.status_code == 401
     assert response.json()["detail"] == "No autenticado"
 
 
-@patch('app.api.v1.endpoints.projects.get_current_user_id')
-@patch('app.api.v1.endpoints.projects.check_user_exists')
-@patch('app.api.v1.endpoints.projects.kpi_repo')
+@patch('app.api.v1.controllers.projects_controller.deps.get_current_user_id')
+@patch('app.api.v1.controllers.projects_controller.deps.check_user_exists')
+@patch('app.api.v1.controllers.projects_controller.kpi_repo')
 def test_get_project_kpis_success(mock_kpi_repo, mock_check_user, mock_current_user):
     """Verifica la obtención exitosa de KPIs para un usuario autenticado."""
     # 1. Configurar mocks de autenticación y usuario
@@ -25,20 +26,6 @@ def test_get_project_kpis_success(mock_kpi_repo, mock_check_user, mock_current_u
     # 2. Configurar mock del repositorio de KPIs
     mock_query = MagicMock()
     mock_kpi_repo.get_all_by_project.return_value = mock_query
-    
-    # Simular registros devueltos por .all()
-    mock_kpis = [
-        MagicMock(
-            id_proyecto="PROJ-1",
-            id_sprint=None,
-            velocity_total_sp=8.0,
-            velocity_promedio_historico=8.0,
-            throughput_issues=2,
-            lead_time_promedio_dias=3.5,
-            cycle_time_promedio_dias=2.5,
-            fecha_calculo=MagicMock()
-        )
-    ]
     
     # Encadenamiento del query: query.order_by().offset().limit().all()
     mock_query.order_by.return_value = mock_query
@@ -57,10 +44,9 @@ def test_get_project_kpis_success(mock_kpi_repo, mock_check_user, mock_current_u
         }
     ]
     
-    # Enviar cookie para que pase la validación inicial de FastAPI del middleware,
-    # aunque get_current_user_id esté mockeado
+    # Enviar cookie para que pase la validación inicial de FastAPI del middleware
     response = client.get(
-        "/api/projects/PROJ-1/kpis",
+        "/api/v1/projects/PROJ-1/kpis",
         cookies={"session_id": "123.mockedsession"}
     )
     
@@ -73,10 +59,10 @@ def test_get_project_kpis_success(mock_kpi_repo, mock_check_user, mock_current_u
     assert data[0]["cycle_time_promedio_dias"] == 2.5
 
 
-@patch('app.api.v1.endpoints.projects.get_current_user_id')
-@patch('app.api.v1.endpoints.projects.check_user_exists')
-@patch('app.api.v1.endpoints.projects.mapping_repo')
-@patch('app.api.v1.endpoints.projects.calculate_and_save_kpis')
+@patch('app.api.v1.controllers.projects_controller.deps.get_current_user_id')
+@patch('app.api.v1.controllers.projects_controller.deps.check_user_exists')
+@patch('app.api.v1.controllers.projects_controller.mapping_repo')
+@patch('app.api.v1.controllers.projects_controller.calculate_and_save_kpis')
 def test_save_project_mappings_endpoint(
     mock_calc_kpis,
     mock_mapping_repo,
@@ -93,7 +79,7 @@ def test_save_project_mappings_endpoint(
     ]
     
     response = client.post(
-        "/api/projects/PROJ-1/mappings",
+        "/api/v1/projects/PROJ-1/mappings",
         json=mappings_payload,
         cookies={"session_id": "123.mockedsession"}
     )
@@ -111,11 +97,9 @@ def test_save_project_mappings_endpoint(
     mock_calc_kpis.assert_called_once()
 
 
-from datetime import datetime
-
-@patch('app.api.v1.endpoints.jira.get_current_user_id')
-@patch('app.api.v1.endpoints.jira.check_user_exists')
-@patch('app.api.v1.endpoints.jira.log_repo')
+@patch('app.api.v1.controllers.jira_controller.deps.get_current_user_id')
+@patch('app.api.v1.controllers.jira_controller.deps.check_user_exists')
+@patch('app.api.v1.controllers.jira_controller.log_repo')
 def test_get_sync_logs_endpoint_success(mock_log_repo, mock_check_user, mock_current_user):
     """Verifica que el endpoint de logs de sincronización serialice correctamente la respuesta."""
     mock_current_user.return_value = 123
@@ -135,7 +119,7 @@ def test_get_sync_logs_endpoint_success(mock_log_repo, mock_check_user, mock_cur
     mock_log_repo.get_recent.return_value = [mock_log]
     
     response = client.get(
-        "/api/jira/sync/logs",
+        "/api/v1/jira/sync/logs",
         cookies={"session_id": "123.mockedsession"}
     )
     
@@ -148,4 +132,3 @@ def test_get_sync_logs_endpoint_success(mock_log_repo, mock_check_user, mock_cur
     assert data[0]["tiempo_ejecucion_segundos"] == 10
     assert data[0]["issues_procesados"] == 100
     assert data[0]["detalle_error"] is None
-

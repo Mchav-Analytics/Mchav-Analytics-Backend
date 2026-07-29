@@ -1,7 +1,6 @@
 # app/api/v1/controllers/projects_controller.py
 # Controlador HTTP para el listado de Proyectos, Sprints, KPIs calculados y Mapeos de Estado
 
-import sys
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -15,10 +14,6 @@ from app.api.v1 import deps
 # Sub-router para la gestión de proyectos
 router = APIRouter()
 
-def _get_projects_module():
-    """Helper interno para mantener compatibilidad con la suite de pruebas mediante resolución dinámica."""
-    return sys.modules.get('app.api.v1.endpoints.projects')
-
 @router.get("", response_model=list[ProjectResponse])
 @router.get("/", response_model=list[ProjectResponse])
 async def get_projects(
@@ -30,18 +25,13 @@ async def get_projects(
     db: Session = Depends(get_db)
 ):
     """
-    GET /api/projects
+    GET /api/v1/projects
     Lista los proyectos sincronizados en el sistema con soporte completo de paginación y ordenamiento.
     """
-    mod = _get_projects_module()
-    get_user_fn = getattr(mod, 'get_current_user_id', deps.get_current_user_id) if mod else deps.get_current_user_id
-    check_user_fn = getattr(mod, 'check_user_exists', deps.check_user_exists) if mod else deps.check_user_exists
-    active_project_repo = getattr(mod, 'project_repo', project_repo) if mod else project_repo
-
-    user_id = get_user_fn(request)
-    check_user_fn(db, user_id)
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
     
-    projects = active_project_repo.get_multi(db, skip=offset, limit=limit, sort=sort, order=order)
+    projects = project_repo.get_multi(db, skip=offset, limit=limit, sort=sort, order=order)
     return projects
 
 @router.get("/{proyecto_id}/kpis")
@@ -56,18 +46,13 @@ async def get_project_kpis(
     db: Session = Depends(get_db)
 ):
     """
-    GET /api/projects/{proyecto_id}/kpis
+    GET /api/v1/projects/{proyecto_id}/kpis
     Obtiene los KPIs calculados de un proyecto. Permite filtrar opcionalmente por sprint_id.
     """
-    mod = _get_projects_module()
-    get_user_fn = getattr(mod, 'get_current_user_id', deps.get_current_user_id) if mod else deps.get_current_user_id
-    check_user_fn = getattr(mod, 'check_user_exists', deps.check_user_exists) if mod else deps.check_user_exists
-    active_kpi_repo = getattr(mod, 'kpi_repo', kpi_repo) if mod else kpi_repo
-
-    user_id = get_user_fn(request)
-    check_user_fn(db, user_id)
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
         
-    query = active_kpi_repo.get_all_by_project(db, proyecto_id)
+    query = kpi_repo.get_all_by_project(db, proyecto_id)
     if sprint_id:
         query = query.filter(models.KpisHistoricos.id_sprint == sprint_id)
         
@@ -94,18 +79,13 @@ async def get_project_sprints(
     db: Session = Depends(get_db)
 ):
     """
-    GET /api/projects/{proyecto_id}/sprints
+    GET /api/v1/projects/{proyecto_id}/sprints
     Obtiene la lista de sprints pertenecientes al proyecto con paginación y ordenamiento.
     """
-    mod = _get_projects_module()
-    get_user_fn = getattr(mod, 'get_current_user_id', deps.get_current_user_id) if mod else deps.get_current_user_id
-    check_user_fn = getattr(mod, 'check_user_exists', deps.check_user_exists) if mod else deps.check_user_exists
-    active_sprint_repo = getattr(mod, 'sprint_repo', sprint_repo) if mod else sprint_repo
-
-    user_id = get_user_fn(request)
-    check_user_fn(db, user_id)
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
         
-    sprints = active_sprint_repo.get_by_project(
+    sprints = sprint_repo.get_by_project(
         db,
         proyecto_id,
         skip=offset,
@@ -118,22 +98,16 @@ async def get_project_sprints(
 @router.get("/{proyecto_id}/statuses")
 async def get_project_unique_statuses(proyecto_id: str, request: Request, db: Session = Depends(get_db)):
     """
-    GET /api/projects/{proyecto_id}/statuses
+    GET /api/v1/projects/{proyecto_id}/statuses
     Obtiene el conjunto único de nombres de estado encontrados en las tareas y transiciones del proyecto.
     Útil para construir las listas desplegables en la interfaz de configuración de mapeos.
     """
-    mod = _get_projects_module()
-    get_user_fn = getattr(mod, 'get_current_user_id', deps.get_current_user_id) if mod else deps.get_current_user_id
-    check_user_fn = getattr(mod, 'check_user_exists', deps.check_user_exists) if mod else deps.check_user_exists
-    active_issue_repo = getattr(mod, 'issue_repo', issue_repo) if mod else issue_repo
-    active_transition_repo = getattr(mod, 'transition_repo', transition_repo) if mod else transition_repo
-
-    user_id = get_user_fn(request)
-    check_user_fn(db, user_id)
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
         
-    statuses = active_issue_repo.get_distinct_statuses_by_project(db, proyecto_id)
-    transitions_statuses_new = active_transition_repo.get_distinct_new_statuses_by_project(db, proyecto_id)
-    transitions_statuses_prev = active_transition_repo.get_distinct_prev_statuses_by_project(db, proyecto_id)
+    statuses = issue_repo.get_distinct_statuses_by_project(db, proyecto_id)
+    transitions_statuses_new = transition_repo.get_distinct_new_statuses_by_project(db, proyecto_id)
+    transitions_statuses_prev = transition_repo.get_distinct_prev_statuses_by_project(db, proyecto_id)
     
     unique_statuses = set()
     for s in statuses:
@@ -148,47 +122,36 @@ async def get_project_unique_statuses(proyecto_id: str, request: Request, db: Se
 @router.get("/{proyecto_id}/mappings")
 async def get_project_mappings(proyecto_id: str, request: Request, db: Session = Depends(get_db)):
     """
-    GET /api/projects/{proyecto_id}/mappings
+    GET /api/v1/projects/{proyecto_id}/mappings
     Obtiene las reglas de mapeo de estado activas para el proyecto.
     """
-    mod = _get_projects_module()
-    get_user_fn = getattr(mod, 'get_current_user_id', deps.get_current_user_id) if mod else deps.get_current_user_id
-    check_user_fn = getattr(mod, 'check_user_exists', deps.check_user_exists) if mod else deps.check_user_exists
-    active_mapping_repo = getattr(mod, 'mapping_repo', mapping_repo) if mod else mapping_repo
-
-    user_id = get_user_fn(request)
-    check_user_fn(db, user_id)
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
         
-    mappings = active_mapping_repo.get_by_project(db, proyecto_id)
+    mappings = mapping_repo.get_by_project(db, proyecto_id)
     return mappings
 
 @router.post("/{proyecto_id}/mappings")
 async def save_project_mappings(proyecto_id: str, mappings_data: list[dict], request: Request, db: Session = Depends(get_db)):
     """
-    POST /api/projects/{proyecto_id}/mappings
+    POST /api/v1/projects/{proyecto_id}/mappings
     Reemplaza las reglas de mapeo de estado de un proyecto y dispara de inmediato el recalculado completo de KPIs.
     """
-    mod = _get_projects_module()
-    get_user_fn = getattr(mod, 'get_current_user_id', deps.get_current_user_id) if mod else deps.get_current_user_id
-    check_user_fn = getattr(mod, 'check_user_exists', deps.check_user_exists) if mod else deps.check_user_exists
-    active_mapping_repo = getattr(mod, 'mapping_repo', mapping_repo) if mod else mapping_repo
-    active_calc_fn = getattr(mod, 'calculate_and_save_kpis', calculate_and_save_kpis) if mod else calculate_and_save_kpis
-
-    user_id = get_user_fn(request)
-    check_user_fn(db, user_id)
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
         
     # Eliminar configuraciones previas del proyecto
-    active_mapping_repo.delete_by_project(db, proyecto_id)
+    mapping_repo.delete_by_project(db, proyecto_id)
     
     # Insertar los nuevos mapeos recibidos
     for item in mappings_data:
-        active_mapping_repo.create(db, obj_in={
+        mapping_repo.create(db, obj_in={
             "id_proyecto": proyecto_id,
             "estado_jira": item.get("estado_jira"),
             "estado_base": item.get("estado_base")
         })
         
     # Recalcular métricas aplicando los nuevos criterios de estado
-    active_calc_fn(db, proyecto_id)
+    calculate_and_save_kpis(db, proyecto_id)
     
     return {"message": "Mapeo guardado y KPIs recalculados con éxito"}
