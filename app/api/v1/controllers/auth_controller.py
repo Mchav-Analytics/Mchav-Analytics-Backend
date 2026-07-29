@@ -74,7 +74,10 @@ async def save_jira_credentials(
         token=payload.jira_api_token
     )
     
-    user_repo.update(db, db_obj=current_user, obj_in={
+    # Fusionamos el usuario en la sesión actual de base de datos 'db' para evitar el error de SQLAlchemy
+    db_user = db.merge(current_user)
+    
+    user_repo.update(db, db_obj=db_user, obj_in={
         "jira_domain": verified_data["jira_domain"],
         "jira_email": verified_data["jira_email"],
         "jira_api_token": verified_data["jira_api_token"],

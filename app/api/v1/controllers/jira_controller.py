@@ -5,10 +5,10 @@ import sys
 import asyncio
 import httpx
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks, Security
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.core.database import get_db
 from app.services.jira_sync import run_jira_sync_task, get_jira_auth_credentials
@@ -23,6 +23,15 @@ from app.models.auth import User
 metrics_cache = ShortLivedCache(ttl_seconds=60)
 
 # Esquemas de respuesta Pydantic
+
+# 1. Agrega este esquema junto con tus otros modelos Pydantic
+class JiraWebhookPayload(BaseModel):
+    webhookEvent: Optional[str] = None
+    timestamp: Optional[int] = None
+    issue: Optional[Dict[str, Any]] = None
+    
+    model_config = ConfigDict(extra="allow")
+
 class JiraMetricsResponse(BaseModel):
     active_projects: int
     completed_tickets: int
@@ -155,19 +164,21 @@ async def get_sync_logs(
     logs = log_repo.get_recent(db, skip=offset, limit=limit)
     return logs
 
+# 2. Modifica la firma del endpoint para que reciba el modelo
 @router.post(
     "/webhook",
     response_model=WebhookResponse,
     summary="Recibir Webhooks de Jira"
 )
-async def jira_webhook(request: Request, db: Session = Depends(get_db)):
+async def jira_webhook(payload: JiraWebhookPayload, db: Session = Depends(get_db)):
     """
     POST /api/jira/webhook
     Endpoint receptor de eventos en tiempo real enviados por Jira (Webhooks).
     Actualiza o crea el ticket correspondiente y recalcula los KPIs del proyecto afectado de inmediato.
     """
-    payload = await request.json()
-    issue_data = payload.get("issue", {})
+    # Como payload ya es un objeto, conviértelo a diccionario o accédelo por atributos
+    data = payload.model_dump()
+    issue_data = data.get("issue", {})
     
     if not issue_data:
         return {"status": "ignored", "reason": "no issue data"}
