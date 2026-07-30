@@ -4,10 +4,10 @@
 import asyncio
 import httpx
 from datetime import datetime
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
+from typing import Any, Dict, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks, Security
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.core.database import get_db
 from app.services.jira_sync import run_jira_sync_task, get_jira_auth_credentials
@@ -15,12 +15,22 @@ from app.services.kpi import calculate_and_save_kpis
 import app.models as models
 from app.repositories import user_repo, project_repo, sprint_repo, issue_repo, transition_repo, log_repo
 from app.core.cache import ShortLivedCache
-from app.api.v1 import deps
+from app.core.security import get_current_user
+from app.models.auth import User
 
 # Instancia global de la caché en memoria de 60 segundos
 metrics_cache = ShortLivedCache(ttl_seconds=60)
 
 # Esquemas de respuesta Pydantic
+
+# 1. Agrega este esquema junto con tus otros modelos Pydantic
+class JiraWebhookPayload(BaseModel):
+    webhookEvent: Optional[str] = None
+    timestamp: Optional[int] = None
+    issue: Optional[Dict[str, Any]] = None
+    
+    model_config = ConfigDict(extra="allow")
+
 class JiraMetricsResponse(BaseModel):
     active_projects: int
     completed_tickets: int
@@ -56,7 +66,10 @@ router = APIRouter()
     response_model=JiraMetricsResponse,
     summary="Obtener métricas rápidas con JQL"
 )
-async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
+async def get_jira_metrics(
+    db: Session = Depends(get_db),
+    current_user: User = Security(get_current_user, scopes=["jira:read"])
+):
     """
     GET /api/v1/jira/metrics
     Consulta en paralelo 4 métricas clave directo a la API REST de Jira (con caché en memoria):
@@ -65,11 +78,16 @@ async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
     3. Total de tickets en desarrollo (In Progress)
     4. Bugs críticos con prioridad alta
     """
+<<<<<<< HEAD
+    base_jira_url, headers = get_jira_auth_credentials(db, current_user)
+    cache_key = f"metrics:{current_user.id_usuario}"
+=======
     user_id = deps.get_current_user_id(request)
     user = deps.check_user_exists(db, user_id)
     
     base_jira_url, headers = get_jira_auth_credentials(db, user)
     cache_key = f"metrics:{user.id_usuario}"
+>>>>>>> origin/Prueba_Desarrollo
     
     # 1. Verificar si existen métricas cacheadas no expiradas
     cached_data = metrics_cache.get(cache_key)
@@ -122,16 +140,23 @@ async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
     response_model=SyncMessageResponse,
     summary="Ejecutar motor ETL de Sincronización"
 )
-async def trigger_jira_sync(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def trigger_jira_sync(
+    background_tasks: BackgroundTasks, 
+    db: Session = Depends(get_db),
+    current_user: User = Security(get_current_user, scopes=["jira:sync"])
+):
     """
     POST /api/v1/jira/sync
     Lanza el proceso de sincronización completa ETL como una tarea en segundo plano (BackgroundTask) no bloqueante.
     """
+<<<<<<< HEAD
+=======
     user_id = deps.get_current_user_id(request)
     user = deps.check_user_exists(db, user_id)
         
+>>>>>>> origin/Prueba_Desarrollo
     # Encolar la tarea asíncrona de sincronización
-    background_tasks.add_task(run_jira_sync_task, user.id_usuario)
+    background_tasks.add_task(run_jira_sync_task, current_user.id_usuario)
     return {"message": "Sincronización iniciada en segundo plano"}
 
 @router.get(
@@ -140,34 +165,39 @@ async def trigger_jira_sync(request: Request, background_tasks: BackgroundTasks,
     summary="Obtener historial de Sincronizaciones (Auditoría ETL)"
 )
 async def get_sync_logs(
-    request: Request,
     limit: int = 20,
     offset: int = 0,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
     """
     GET /api/v1/jira/sync/logs
     Obtiene los registros de auditoría de sincronizaciones anteriores con paginación.
     """
+<<<<<<< HEAD
+=======
     user_id = deps.get_current_user_id(request)
     deps.check_user_exists(db, user_id)
         
+>>>>>>> origin/Prueba_Desarrollo
     logs = log_repo.get_recent(db, skip=offset, limit=limit)
     return logs
 
+# 2. Modifica la firma del endpoint para que reciba el modelo
 @router.post(
     "/webhook",
     response_model=WebhookResponse,
     summary="Recibir Webhooks de Jira"
 )
-async def jira_webhook(request: Request, db: Session = Depends(get_db)):
+async def jira_webhook(payload: JiraWebhookPayload, db: Session = Depends(get_db)):
     """
     POST /api/v1/jira/webhook
     Endpoint receptor de eventos en tiempo real enviados por Jira (Webhooks).
     Actualiza o crea el ticket correspondiente y recalcula los KPIs del proyecto afectado de inmediato.
     """
-    payload = await request.json()
-    issue_data = payload.get("issue", {})
+    # Como payload ya es un objeto, conviértelo a diccionario o accédelo por atributos
+    data = payload.model_dump()
+    issue_data = data.get("issue", {})
     
     if not issue_data:
         return {"status": "ignored", "reason": "no issue data"}

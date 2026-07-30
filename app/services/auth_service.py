@@ -44,7 +44,6 @@ def build_jira_oauth_url(state: str) -> str:
 
     scopes = "read:jira-user read:jira-work offline_access"
     params = {
-        "audience": "api.atlassian.com",
         "client_id": CLIENT_ID,
         "scope": scopes,
         "redirect_uri": CALLBACK_URL,
@@ -53,7 +52,10 @@ def build_jira_oauth_url(state: str) -> str:
         "prompt": "consent"
     }
     query_string = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
-    return f"{AUTHORIZATION_BASE_URL}?{query_string}"
+    full_url = f"{AUTHORIZATION_BASE_URL}?{query_string}"
+    
+    print(f"\n--- URL DE OAUTH GENERADA ---\n{full_url}\n----------------------------\n")
+    return full_url
 
 async def exchange_code_for_user_profile(code: str) -> dict:
     """

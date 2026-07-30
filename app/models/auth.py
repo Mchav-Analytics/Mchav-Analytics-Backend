@@ -15,12 +15,22 @@ class Role(Base):
 
     # Clave primaria autonumerada del rol
     id_rol = Column(Integer, primary_key=True, autoincrement=True)
-    
+    # NUEVO: permisos (scopes) asignados a este rol, separados por coma.
+    # Ejemplo: "jira:read,jira:sync,projects:write"
+    # String simple en vez de ARRAY para que funcione igual en Postgres y SQLite.
+    scopes = Column(String(500), nullable=False, default="")
     # Nombre del rol (ejemplo: 'Administrador', 'Analista', 'Líder de Proyecto')
     nombre_rol = Column(String(50), unique=True, nullable=False)
 
     # Relación uno-a-muchos con el modelo User
     usuarios = relationship("User", back_populates="rol")
+
+    @property
+    def scopes_list(self) -> list[str]:
+        """Devuelve los scopes del rol como lista de strings limpia."""
+        if not self.scopes:
+            return []
+        return [s.strip() for s in self.scopes.split(",") if s.strip()]
 
 class User(Base):
     """
@@ -45,6 +55,10 @@ class User(Base):
     # Estado del usuario (True: Activo, False: Inactivo/Bloqueado)
     activo = Column(Boolean, nullable=False, default=True)
 
+    # NUEVO: hash de contraseña (bcrypt) para login local vía Password Flow.
+    # Nullable porque los usuarios creados vía OAuth de Atlassian no la usan.
+    password_hash = Column(String(255), nullable=True)
+    
     # Identificador único de cuenta de Jira Atlassian (AccountId)
     jira_account_id = Column(String(100), unique=True, index=True, nullable=True)
     
