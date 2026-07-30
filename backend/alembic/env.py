@@ -7,7 +7,7 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from app.core.config import settings
-from app.features.jira.models import Base
+from app.models import Base
 
 from alembic import context
 

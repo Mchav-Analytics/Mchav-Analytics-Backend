@@ -3,9 +3,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.core.exceptions import NotFoundError
-from app.features.jira.models import Project
-from app.services.kpi import KpiService
-from app.services.project import ProjectService
+from app.models import Project
+from app.services.kpi_service import KpiService
+from app.services.project_service import ProjectService
 
 
 class FakeSprint:

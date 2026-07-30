@@ -1,4 +1,8 @@
-"""Excepciones de dominio para respuestas HTTP consistentes."""
+"""Excepciones de dominio para respuestas HTTP consistentes.
+
+Los services lanzan estas excepciones; FastAPI las traduce a JSON en main.py.
+Así la capa de aplicación no depende de HTTPException.
+"""
 
 
 class AppError(Exception):
@@ -13,6 +17,23 @@ class AppError(Exception):
 class NotFoundError(AppError):
     def __init__(self, message: str):
         super().__init__(message, status_code=404)
+
+
+class UnauthorizedError(AppError):
+    def __init__(self, message: str = "No autorizado"):
+        super().__init__(message, status_code=401)
+
+
+class ForbiddenError(AppError):
+    def __init__(self, message: str = "Acceso denegado"):
+        super().__init__(message, status_code=403)
+
+
+class ExternalAuthError(AppError):
+    """Fallo al hablar con el proveedor OAuth externo."""
+
+    def __init__(self, message: str):
+        super().__init__(message, status_code=502)
 
 
 class JiraConnectionError(AppError):

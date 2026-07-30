@@ -1,21 +1,19 @@
-import pytest
-
-from app.services.jira_queries import open_issues_jql, project_issues_jql, resolved_in_period_jql
+from app.services.jql_builder import JqlBuilder
 from app.services.mappers.jira_mapper import extract_story_points, map_jira_project
 
 
 def test_project_issues_jql_contains_key():
-    jql = project_issues_jql("SCRUM")
+    jql = JqlBuilder.project_issues("SCRUM")
     assert 'project = "SCRUM"' in jql
 
 
 def test_open_issues_jql_is_unresolved():
-    jql = open_issues_jql("MCHAV")
+    jql = JqlBuilder.open_issues("MCHAV")
     assert "resolution = Unresolved" in jql
 
 
 def test_resolved_in_period_jql_uses_days():
-    jql = resolved_in_period_jql("MCHAV", days=14)
+    jql = JqlBuilder.resolved_in_period("MCHAV", days=14)
     assert "resolved >= -14d" in jql
 
 

@@ -13,6 +13,10 @@ _INSECURE_SECRETS = frozenset(
 
 
 class Settings(BaseSettings):
+    PROJECT_NAME: str = "MCHAV Analytics Backend"
+    VERSION: str = "1.2.0"
+    API_V1_PREFIX: str = "/api"
+
     DB_USER: str = "mchav"
     DB_PASSWORD: str = "mchav123"
     DB_NAME: str = "mchav_db"
@@ -24,15 +28,16 @@ class Settings(BaseSettings):
     JIRA_API_TOKEN: str = ""
     JIRA_CLIENT_ID: str = ""
     JIRA_CLIENT_SECRET: str = ""
-    JIRA_REDIRECT_URI: str = "http://localhost:8080/api/auth/callback"
+    JIRA_REDIRECT_URI: str = "http://localhost:8000/api/auth/oauth/callback"
     ALLOWED_EMAIL_DOMAIN: str = "grupoasd.com"
 
-    # Campos personalizados de Jira (varían por instancia)
     JIRA_SPRINT_FIELD: str = "customfield_10020"
     JIRA_STORY_POINT_FIELDS: str = "customfield_10016,customfield_10002,storyPoints"
 
     ENV: str = "dev"
-    FRONTEND_URL: str = "http://localhost:3000"
+    # Orígenes CORS separados por coma (API-first, sin frontend embebido).
+    BACKEND_CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8080"
+    AUTH_RETURN_JSON: bool = True
     JWT_SECRET_KEY: str = "dev-jwt-secret-change-me"
     SESSION_SECRET_KEY: str = "dev-session-secret-change-me"
     UVICORN_RELOAD: bool = True
@@ -43,6 +48,14 @@ class Settings(BaseSettings):
             f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         )
+
+    @property
+    def CORS_ORIGINS(self) -> list[str]:
+        return [
+            origin.strip()
+            for origin in self.BACKEND_CORS_ORIGINS.split(",")
+            if origin.strip()
+        ]
 
     @property
     def story_point_field_names(self) -> tuple[str, ...]:

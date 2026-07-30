@@ -1,91 +1,119 @@
-# MCHAV Analytics
+# MCHAV Analytics Backend
 
-Monorepo con backend (FastAPI) y frontend (React) para métricas, sincronización Jira y dashboard operativo.
+API FastAPI para sincronización con Jira, persistencia en PostgreSQL y cálculo de KPIs ágiles.
+
+Estructura alineada con la guía [Bigger Applications](https://fastapi.tiangolo.com/tutorial/bigger-applications/) de FastAPI.
 
 ## Estructura
 
 ```text
 backend/
-  app/              API, servicios, modelos ORM y seeds
-  alembic/          Migraciones de base de datos
-  tests/            Pruebas pytest
+  app/
+    main.py           # Entrada FastAPI + lifespan + middlewares
+    api/
+      router.py       # Agregador de routers
+      deps.py         # Dependency Injection
+      routes/         # Controllers HTTP por dominio
+    core/             # Settings, security, exceptions
+    db/               # Engine, sesión, Base ORM
+    models/           # Modelos SQLAlchemy
+    schemas/          # DTOs Pydantic
+    services/         # Lógica de negocio / ETL / KPIs
+    seeds/            # Datos iniciales
+  alembic/            # Migraciones
+  tests/              # Pruebas unitarias e integración ligera
   Dockerfile
   requirements.txt
-frontend/
-  src/              Dashboard, auth y cliente API
-docker-compose.yml  Backend + PostgreSQL
+  requirements-dev.txt
+docker-compose.yml    # Backend + PostgreSQL
 ```
 
-## Levantar entorno (sin Python local)
+## Levantar entorno
 
 ```powershell
-# 1. Crear .env en la raíz del repo
 copy backend\.env.example .env
-
-# 2. Levantar servicios
 docker compose up -d --build
-
-# 3. Migraciones
 docker compose exec backend alembic upgrade head
-
-# 4. Datos iniciales
 docker compose exec backend python -m app.seeds
-
-# 5. Probar salud
 curl http://localhost:8080/health
 ```
 
-## Frontend
+Documentación interactiva:
 
-```powershell
-cd frontend
-npm install
-npm run dev
-```
-
-El dev server corre en `http://localhost:3000` y hace proxy de `/api` hacia el backend en `:8080`.
+- Swagger UI: http://localhost:8080/docs
+- ReDoc: http://localhost:8080/redoc
 
 ## Endpoints principales
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
+| GET | `/health` | Salud del servicio y BD |
 | GET | `/api/auth/login` | Inicia OAuth con Atlassian |
-| GET | `/api/auth/callback` | Callback OAuth |
-| POST | `/api/auth/logout` | Cierra sesión |
-| GET | `/api/jira/proyecto/{key}` | Proyecto en vivo desde Jira |
-| POST | `/api/jira/search` | Ejecuta JQL contra Jira |
-| GET | `/api/jira/metrics/open-issues/{key}` | Conteo de issues abiertos |
-| GET | `/api/projects` | Proyectos persistidos en MCHAV |
-| POST | `/api/projects/sync` | Sincroniza proyecto Jira -> BD (admin) |
-| GET | `/api/kpis/sprints/{id}` | KPIs calculados de un sprint |
-| POST | `/api/kpis/sprints/{id}/compute` | Recalcula KPIs del sprint |
-| GET | `/docs` | Swagger UI |
+| GET | `/api/auth/callback` | Callback OAuth → JWT JSON con scopes |
+| POST | `/api/auth/token` | Token para Authorize de `/docs` (OAuth2PasswordBearer) |
+| GET | `/api/auth/scopes` | Catálogo de scopes OAuth2 |
+| POST | `/api/auth/logout` | Cierra sesión local |
+| GET | `/api/jira/proyecto/{key}` | Proyecto en vivo desde Jira (`jira:read`) |
+| POST | `/api/jira/search` | Ejecuta JQL (`jira:read`) |
+| GET | `/api/projects` | Proyectos persistidos (`projects:read`) |
+| POST | `/api/projects/sync` | Sync Jira → BD (`projects:sync`) |
+| GET | `/api/kpis/sprints/{id}` | KPIs de un sprint (`kpis:read`) |
+| POST | `/api/kpis/sprints/{id}/compute` | Recalcula KPIs (`kpis:compute`) |
+
+## OAuth2 scopes
+
+Integración según [FastAPI OAuth2 scopes](https://fastapi.tiangolo.com/advanced/security/oauth2-scopes/):
+
+| Scope | Permiso |
+|-------|---------|
+| `me` | Usuario autenticado |
+| `projects:read` | Lectura de proyectos/sprints/issues |
+| `projects:sync` | Sincronización Jira → BD |
+| `jira:read` | Consultas live a Jira |
+| `kpis:read` | Lectura de KPIs |
+| `kpis:compute` | Cálculo de KPIs |
+| `admin` | Endpoints administrativos |
+
+- **Administrador** recibe todos los scopes.
+- **Consultor** recibe solo scopes de lectura (`me`, `projects:read`, `jira:read`, `kpis:read`).
+- El JWT incluye el claim `scope` (cadena separada por espacios).
+- Los endpoints usan `Security(get_current_user, scopes=[...])`.
+
+En `/docs` → **Authorize**: pega el JWT del callback en el campo password.
 
 ## Flujo recomendado
 
-1. Login OAuth y obtener JWT.
-2. `POST /api/projects/sync` con `{ "project_key": "SCRUM" }`.
-3. `POST /api/kpis/sprints/{id}/compute`.
-4. `GET /api/kpis/sprints/{id}` para consumir desde frontend.
+1. `GET /api/auth/login` y completar OAuth.
+2. Usar el `access_token` Bearer en el resto de endpoints.
+3. `POST /api/projects/sync` con `{ "project_key": "SCRUM" }`.
+4. `POST /api/kpis/sprints/{id}/compute` y consultar KPIs.
 
 ## Pruebas
 
 ```powershell
+docker compose exec backend pip install -r requirements-dev.txt
 docker compose exec backend pytest -q
-cd frontend
-npm test
 ```
 
-## Variables de entorno críticas
+O en local (desde `backend/`):
 
-El archivo `.env` vive en la raíz del repo (lo lee `docker-compose.yml`).
+```powershell
+pip install -r requirements-dev.txt
+pytest -q
+```
 
-- `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` → conexión técnica a Jira
-- `JIRA_CLIENT_ID`, `JIRA_CLIENT_SECRET` → OAuth de usuarios
-- `DB_*` → PostgreSQL
+## Variables de entorno
 
-## Notas de arquitectura
+Ver `backend/.env.example`. Críticas:
 
-- OAuth identifica usuarios (JWT interno).
-- API Token admin consulta y sincroniza Jira de forma centralizada.
-- Los KPIs se calculan sobre datos locales (`issues`, `sprints`) para no depender de Jira en cada vista.
+- `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`
+- `JIRA_CLIENT_ID`, `JIRA_CLIENT_SECRET`
+- `DB_*`, `JWT_SECRET_KEY`, `SESSION_SECRET_KEY`
+- `BACKEND_CORS_ORIGINS`, `AUTH_RETURN_JSON`
+
+## Arquitectura
+
+- OAuth identifica usuarios (JWT interno HS256, 8h).
+- API Token admin consulta y sincroniza Jira de forma centralizada (`httpx`).
+- KPIs se calculan sobre datos locales para no depender de Jira en cada vista.
+- Capas: routes → services → models/db (Dependency Injection).
