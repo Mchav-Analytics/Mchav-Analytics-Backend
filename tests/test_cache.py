@@ -32,12 +32,12 @@ def test_short_lived_cache_expiration():
 
 
 @pytest.mark.anyio
-@patch('app.api.v1.endpoints.jira.get_current_user_id')
-@patch('app.api.v1.endpoints.jira.check_user_exists')
+@patch('app.api.v1.controllers.jira_controller.deps.get_current_user_id')
+@patch('app.api.v1.controllers.jira_controller.deps.check_user_exists')
 @patch('httpx.AsyncClient.get')
 async def test_get_jira_metrics_uses_cache(mock_httpx_get, mock_check_user, mock_current_user):
     """Verifica que el endpoint /metrics use ShortLivedCache en llamadas repetidas."""
-    from app.api.v1.endpoints.jira import metrics_cache
+    from app.api.v1.controllers.jira_controller import metrics_cache
     metrics_cache.clear() # Limpiar cualquier residuo de pruebas
     
     mock_current_user.return_value = 55
@@ -54,7 +54,7 @@ async def test_get_jira_metrics_uses_cache(mock_httpx_get, mock_check_user, mock
     mock_httpx_get.return_value = mock_response
     
     # 1. Primera petición: Debería llamar a HTTPX
-    response1 = client.get("/api/jira/metrics", cookies={"session_id": "55.mock"})
+    response1 = client.get("/api/v1/jira/metrics", cookies={"session_id": "55.mock"})
     assert response1.status_code == 200
     assert response1.json()["completed_tickets"] == 5
     # Se debió llamar 4 veces (1 por cada consulta en paralelo)
@@ -64,7 +64,7 @@ async def test_get_jira_metrics_uses_cache(mock_httpx_get, mock_check_user, mock
     mock_httpx_get.reset_mock()
     
     # 2. Segunda petición: Debería retornar de caché (no hacer llamadas HTTPX)
-    response2 = client.get("/api/jira/metrics", cookies={"session_id": "55.mock"})
+    response2 = client.get("/api/v1/jira/metrics", cookies={"session_id": "55.mock"})
     assert response2.status_code == 200
     assert response2.json()["completed_tickets"] == 5
     # No se debió llamar a httpx.AsyncClient.get ya que los datos se recuperan de caché

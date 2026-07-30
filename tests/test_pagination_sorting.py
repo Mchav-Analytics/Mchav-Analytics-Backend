@@ -2,15 +2,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import Request
 
-# Import real functions to test their integration/parameter passing
-from app.api.v1.endpoints.projects import get_projects, get_project_kpis, get_project_sprints
-from app.api.v1.endpoints.jira import get_sync_logs
+# Import real functions from controllers to test parameter passing
+from app.api.v1.controllers.projects_controller import get_projects, get_project_kpis, get_project_sprints
+from app.api.v1.controllers.jira_controller import get_sync_logs
 import app.models as models
 
 @pytest.mark.anyio
-@patch('app.api.v1.endpoints.projects.get_current_user_id')
-@patch('app.api.v1.endpoints.projects.check_user_exists')
-@patch('app.api.v1.endpoints.projects.project_repo')
+@patch('app.api.v1.controllers.projects_controller.deps.get_current_user_id')
+@patch('app.api.v1.controllers.projects_controller.deps.check_user_exists')
+@patch('app.api.v1.controllers.projects_controller.project_repo')
 async def test_get_projects_pagination_and_sorting(
     mock_project_repo,
     mock_check_user,
@@ -41,9 +41,9 @@ async def test_get_projects_pagination_and_sorting(
 
 
 @pytest.mark.anyio
-@patch('app.api.v1.endpoints.projects.get_current_user_id')
-@patch('app.api.v1.endpoints.projects.check_user_exists')
-@patch('app.api.v1.endpoints.projects.kpi_repo')
+@patch('app.api.v1.controllers.projects_controller.deps.get_current_user_id')
+@patch('app.api.v1.controllers.projects_controller.deps.check_user_exists')
+@patch('app.api.v1.controllers.projects_controller.kpi_repo')
 async def test_get_project_kpis_pagination_and_sorting(
     mock_kpi_repo,
     mock_check_user,
@@ -93,9 +93,9 @@ async def test_get_project_kpis_pagination_and_sorting(
 
 
 @pytest.mark.anyio
-@patch('app.api.v1.endpoints.projects.get_current_user_id')
-@patch('app.api.v1.endpoints.projects.check_user_exists')
-@patch('app.api.v1.endpoints.projects.sprint_repo')
+@patch('app.api.v1.controllers.projects_controller.deps.get_current_user_id')
+@patch('app.api.v1.controllers.projects_controller.deps.check_user_exists')
+@patch('app.api.v1.controllers.projects_controller.sprint_repo')
 async def test_get_project_sprints_pagination_and_sorting(
     mock_sprint_repo,
     mock_check_user,
@@ -127,9 +127,9 @@ async def test_get_project_sprints_pagination_and_sorting(
 
 
 @pytest.mark.anyio
-@patch('app.api.v1.endpoints.jira.get_current_user_id')
-@patch('app.api.v1.endpoints.jira.check_user_exists')
-@patch('app.api.v1.endpoints.jira.log_repo')
+@patch('app.api.v1.controllers.jira_controller.deps.get_current_user_id')
+@patch('app.api.v1.controllers.jira_controller.deps.check_user_exists')
+@patch('app.api.v1.controllers.jira_controller.log_repo')
 async def test_get_sync_logs_pagination(
     mock_log_repo,
     mock_check_user,

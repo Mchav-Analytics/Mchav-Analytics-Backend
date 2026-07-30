@@ -1,7 +1,13 @@
 # app/api/v1/controllers/jql_controller.py
+<<<<<<< HEAD:app/api/v1/endpoints/jql_queries.py
 # Controlador HTTP para consultas avanzadas JQL especializadas (Deltas, Velocidad, Throughput y Tiempos de Ciclo)
 
 from fastapi import APIRouter, Depends, Security
+=======
+# Controlador HTTP para ejecutar consultas JQL parametrizadas contra Jira
+
+from fastapi import APIRouter
+>>>>>>> origin/Prueba_Desarrollo:app/api/v1/controllers/jql_controller.py
 from datetime import datetime, timezone
 from typing import List
 from sqlalchemy.orm import Session
@@ -12,6 +18,7 @@ from app.models.auth import User
 from app.schemas.jql import JQLQueryResponse, MetricSummarySchema, IssueBasicSchema
 from app.core.jql_config import JQLQueries
 
+# Router principal para los endpoints de consultas JQL
 router = APIRouter()
 
 @router.get(
@@ -25,11 +32,16 @@ router = APIRouter()
     Evita tener que re-sincronizar toda la historia de Jira, optimizando recursos y tiempos de cálculo.
     """
 )
+<<<<<<< HEAD:app/api/v1/endpoints/jql_queries.py
 async def get_extraction_delta(
     project_key: str,
     db: Session = Depends(get_db),
     current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
+=======
+async def get_extraction_delta(project_key: str):
+    """Genera y ejecuta la consulta JQL de extracción delta (-24h) para un proyecto."""
+>>>>>>> origin/Prueba_Desarrollo:app/api/v1/controllers/jql_controller.py
     jql = JQLQueries.DELTA_EXTRACTION.format(project_key=project_key)
     
     return JQLQueryResponse(
@@ -49,6 +61,7 @@ async def get_extraction_delta(
     y contabilizar el volumen neto de filas o tickets entregados (Throughput). 
     """
 )
+<<<<<<< HEAD:app/api/v1/endpoints/jql_queries.py
 async def get_velocity_throughput(
     project_key: str, 
     status_done: str, 
@@ -56,6 +69,10 @@ async def get_velocity_throughput(
     db: Session = Depends(get_db),
     current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
+=======
+async def get_velocity_throughput(project_key: str, status_done: str, sprint_id: int):
+    """Genera la consulta JQL parametrizada para obtener Velocity y Throughput de un sprint."""
+>>>>>>> origin/Prueba_Desarrollo:app/api/v1/controllers/jql_controller.py
     jql = JQLQueries.VELOCITY_THROUGHPUT.format(
         project_key=project_key, 
         status_done=status_done, 
@@ -78,6 +95,7 @@ async def get_velocity_throughput(
     Extrae ítems resueltos en un rango de fechas determinado para mapear el ciclo de vida y pre-computar promedios en días hábiles.
     """
 )
+<<<<<<< HEAD:app/api/v1/endpoints/jql_queries.py
 async def get_time_cycles(
     project_key: str, 
     start_date: str, 
@@ -85,6 +103,10 @@ async def get_time_cycles(
     db: Session = Depends(get_db),
     current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
+=======
+async def get_time_cycles(project_key: str, start_date: str, end_date: str):
+    """Genera la consulta JQL parametrizada para obtener los tickets resueltos en un rango de fechas."""
+>>>>>>> origin/Prueba_Desarrollo:app/api/v1/controllers/jql_controller.py
     jql = JQLQueries.TIME_CYCLES.format(
         project_key=project_key, 
         start_date=start_date, 

@@ -1,8 +1,12 @@
 # app/api/v1/controllers/projects_controller.py
 # Controlador HTTP para el listado de Proyectos, Sprints, KPIs calculados y Mapeos de Estado
 
+<<<<<<< HEAD
 import sys
 from fastapi import APIRouter, Depends, HTTPException, Request, Security
+=======
+from fastapi import APIRouter, Depends, HTTPException, Request
+>>>>>>> origin/Prueba_Desarrollo
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -27,9 +31,15 @@ async def get_projects(
     current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
     """
-    GET /api/projects
+    GET /api/v1/projects
     Lista los proyectos sincronizados en el sistema con soporte completo de paginación y ordenamiento.
     """
+<<<<<<< HEAD
+=======
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
+    
+>>>>>>> origin/Prueba_Desarrollo
     projects = project_repo.get_multi(db, skip=offset, limit=limit, sort=sort, order=order)
     return projects
 
@@ -45,9 +55,15 @@ async def get_project_kpis(
     current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
     """
-    GET /api/projects/{proyecto_id}/kpis
+    GET /api/v1/projects/{proyecto_id}/kpis
     Obtiene los KPIs calculados de un proyecto. Permite filtrar opcionalmente por sprint_id.
     """
+<<<<<<< HEAD
+=======
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
+        
+>>>>>>> origin/Prueba_Desarrollo
     query = kpi_repo.get_all_by_project(db, proyecto_id)
     if sprint_id:
         query = query.filter(models.KpisHistoricos.id_sprint == sprint_id)
@@ -75,9 +91,15 @@ async def get_project_sprints(
     current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
     """
-    GET /api/projects/{proyecto_id}/sprints
+    GET /api/v1/projects/{proyecto_id}/sprints
     Obtiene la lista de sprints pertenecientes al proyecto con paginación y ordenamiento.
     """
+<<<<<<< HEAD
+=======
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
+        
+>>>>>>> origin/Prueba_Desarrollo
     sprints = sprint_repo.get_by_project(
         db,
         proyecto_id,
@@ -95,10 +117,16 @@ async def get_project_unique_statuses(
     current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
     """
-    GET /api/projects/{proyecto_id}/statuses
+    GET /api/v1/projects/{proyecto_id}/statuses
     Obtiene el conjunto único de nombres de estado encontrados en las tareas y transiciones del proyecto.
     Útil para construir las listas desplegables en la interfaz de configuración de mapeos.
     """
+<<<<<<< HEAD
+=======
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
+        
+>>>>>>> origin/Prueba_Desarrollo
     statuses = issue_repo.get_distinct_statuses_by_project(db, proyecto_id)
     transitions_statuses_new = transition_repo.get_distinct_new_statuses_by_project(db, proyecto_id)
     transitions_statuses_prev = transition_repo.get_distinct_prev_statuses_by_project(db, proyecto_id)
@@ -120,9 +148,15 @@ async def get_project_mappings(
     current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
     """
-    GET /api/projects/{proyecto_id}/mappings
+    GET /api/v1/projects/{proyecto_id}/mappings
     Obtiene las reglas de mapeo de estado activas para el proyecto.
     """
+<<<<<<< HEAD
+=======
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
+        
+>>>>>>> origin/Prueba_Desarrollo
     mappings = mapping_repo.get_by_project(db, proyecto_id)
     return mappings
 
@@ -134,9 +168,15 @@ async def save_project_mappings(
     current_user: User = Security(get_current_user, scopes=["projects:write"])
 ):
     """
-    POST /api/projects/{proyecto_id}/mappings
+    POST /api/v1/projects/{proyecto_id}/mappings
     Reemplaza las reglas de mapeo de estado de un proyecto y dispara de inmediato el recalculado completo de KPIs.
     """
+<<<<<<< HEAD
+=======
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
+        
+>>>>>>> origin/Prueba_Desarrollo
     # Eliminar configuraciones previas del proyecto
     mapping_repo.delete_by_project(db, proyecto_id)
     
