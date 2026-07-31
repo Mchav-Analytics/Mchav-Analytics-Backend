@@ -27,5 +27,8 @@ venv/
 *.db
 *.sqlite
 
+# Coverage report
+.coverage
+
 # Scratch scripts
 scratch/

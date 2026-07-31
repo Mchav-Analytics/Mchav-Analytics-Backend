@@ -8,7 +8,7 @@ import time
 import traceback
 import httpx
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 import app.models as models
@@ -165,8 +165,8 @@ async def sync_issues_for_project(
             created_str = fields.get("created")
             updated_str = fields.get("updated")
             
-            created_at = datetime.fromisoformat(created_str.replace("Z", "+00:00")) if created_str else datetime.utcnow()
-            updated_at = datetime.fromisoformat(updated_str.replace("Z", "+00:00")) if updated_str else datetime.utcnow()
+            created_at = datetime.fromisoformat(created_str.replace("Z", "+00:00")) if created_str else datetime.now(timezone.utc)
+            updated_at = datetime.fromisoformat(updated_str.replace("Z", "+00:00")) if updated_str else datetime.now(timezone.utc)
             
             # Extraer Sprint(s) asignados al ticket
             all_issue_sprints = []
@@ -236,7 +236,7 @@ async def sync_issues_for_project(
                 
                 for history in histories:
                     created_t = history.get("created")
-                    t_date = datetime.fromisoformat(created_t.replace("Z", "+00:00")) if created_t else datetime.utcnow()
+                    t_date = datetime.fromisoformat(created_t.replace("Z", "+00:00")) if created_t else datetime.now(timezone.utc)
                     
                     for item in history.get("items", []):
                         if item.get("field") == "status":
@@ -282,7 +282,7 @@ def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
 
         ejecutado_por = user.nombre or user.email or f"Usuario {user_id}"
         log_entry = log_repo.create(db, obj_in={
-            "fecha_ejecucion": datetime.utcnow(),
+            "fecha_ejecucion": datetime.now(timezone.utc),
             "tipo_sincronizacion": tipo_sincronizacion,
             "issues_procesados": 0,
             "tiempo_ejecucion_segundos": 0,
