@@ -32,6 +32,8 @@ class Proyecto(Base):
     issues = relationship("Issue", back_populates="proyecto", cascade="all, delete-orphan")
     kpis = relationship("KpisHistoricos", back_populates="proyecto", cascade="all, delete-orphan")
     mappings = relationship("MapeoEstado", cascade="all, delete-orphan")
+    usuarios_asignados = relationship("UserProject", back_populates="proyecto", cascade="all, delete-orphan")
+
 
 class Sprint(Base):
     """

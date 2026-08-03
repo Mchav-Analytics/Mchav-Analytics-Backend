@@ -104,9 +104,17 @@ async def exchange_code_for_user_profile(code: str) -> dict:
         # Obtener el perfil del usuario autenticado (/myself)
         profile = await _fetch_user_profile_with_fallback(client, cloud_id, headers)
 
+        user_email = profile.get("emailAddress", "") or ""
+        # Validación de dominio desactivada temporalmente: permite el ingreso de cualquier correo electrónico
+        # if not user_email.lower().endswith("@grupoasd.com"):
+        #     raise HTTPException(
+        #         status_code=403,
+        #         detail="Acceso denegado. Únicamente se admiten usuarios de la organización (@grupoasd.com)."
+        #     )
+
         return {
             "jira_account_id": profile.get("accountId"),
-            "email": profile.get("emailAddress"),
+            "email": user_email,
             "nombre": profile.get("displayName"),
             "access_token": access_token,
             "refresh_token": refresh_token,

@@ -81,3 +81,22 @@ class User(Base):
 
     # Relación inversa muchos-a-uno hacia la tabla de roles
     rol = relationship("Role", back_populates="usuarios")
+    
+    # Relación uno-a-muchos con la asignación de proyectos (HU-005)
+    proyectos_asignados = relationship("UserProject", back_populates="usuario", cascade="all, delete-orphan")
+
+class UserProject(Base):
+    """
+    Modelo ORM para la asignación de proyectos de Jira a usuarios (HU-005).
+    Tabla: 'usuario_proyecto'
+    """
+    __tablename__ = "usuario_proyecto"
+
+    id_usuario = Column(Integer, ForeignKey("usuarios.id_usuario", ondelete="CASCADE"), primary_key=True)
+    id_proyecto = Column(String(50), ForeignKey("proyectos.id_proyecto", ondelete="CASCADE"), primary_key=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    usuario = relationship("User", back_populates="proyectos_asignados")
+    proyecto = relationship("Proyecto", back_populates="usuarios_asignados")
+

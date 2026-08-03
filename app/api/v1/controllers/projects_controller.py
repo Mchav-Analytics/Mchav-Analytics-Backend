@@ -1,6 +1,8 @@
 # app/api/v1/controllers/projects_controller.py
 # Controlador HTTP para el listado de Proyectos, Sprints, KPIs calculados y Mapeos de Estado
 
+from typing import Optional
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -29,9 +31,17 @@ async def get_projects(
     Lista los proyectos sincronizados en el sistema con soporte completo de paginación y ordenamiento.
     """
     user_id = deps.get_current_user_id(request)
-    deps.check_user_exists(db, user_id)
+    user = deps.check_user_exists(db, user_id)
     
-    projects = project_repo.get_multi(db, skip=offset, limit=limit, sort=sort, order=order)
+    rol_nombre = user.rol.nombre_rol.lower() if user.rol else ""
+    if rol_nombre == "administrador":
+        projects = project_repo.get_multi(db, skip=offset, limit=limit, sort=sort, order=order)
+    else:
+        assigned_proj_ids = [p.id_proyecto for p in user.proyectos_asignados]
+        if assigned_proj_ids:
+            projects = db.query(models.Proyecto).filter(models.Proyecto.id_proyecto.in_(assigned_proj_ids)).all()
+        else:
+            projects = project_repo.get_multi(db, skip=offset, limit=limit, sort=sort, order=order)
     return projects
 
 @router.get("/{proyecto_id}/kpis")
@@ -39,6 +49,8 @@ async def get_project_kpis(
     request: Request,
     proyecto_id: str,
     sprint_id: str = None,
+    fecha_inicio: str = None,
+    fecha_fin: str = None,
     limit: int = 100,
     offset: int = 0,
     sort: str = "fecha_calculo",
@@ -47,7 +59,7 @@ async def get_project_kpis(
 ):
     """
     GET /api/v1/projects/{proyecto_id}/kpis
-    Obtiene los KPIs calculados de un proyecto. Permite filtrar opcionalmente por sprint_id.
+    Obtiene los KPIs calculados de un proyecto. Permite filtrar opcionalmente por sprint_id y rango de fechas.
     """
     user_id = deps.get_current_user_id(request)
     deps.check_user_exists(db, user_id)
@@ -56,6 +68,20 @@ async def get_project_kpis(
     if sprint_id:
         query = query.filter(models.KpisHistoricos.id_sprint == sprint_id)
         
+    if fecha_inicio:
+        try:
+            dt_start = datetime.fromisoformat(fecha_inicio.replace("Z", "+00:00"))
+            query = query.filter(models.KpisHistoricos.fecha_calculo >= dt_start)
+        except ValueError:
+            pass
+
+    if fecha_fin:
+        try:
+            dt_end = datetime.fromisoformat(fecha_fin.replace("Z", "+00:00"))
+            query = query.filter(models.KpisHistoricos.fecha_calculo <= dt_end)
+        except ValueError:
+            pass
+
     field = getattr(models.KpisHistoricos, sort, None)
     if field is None:
         field = models.KpisHistoricos.fecha_calculo
@@ -67,6 +93,99 @@ async def get_project_kpis(
         
     kpis = query.offset(offset).limit(limit).all()
     return kpis
+
+@router.get("/{proyecto_id}/kpis/issues-detail")
+async def get_project_kpis_issues_detail(
+    request: Request,
+    proyecto_id: str,
+    sprint_id: Optional[str] = None,
+    metric_type: Optional[str] = None,
+    fecha_inicio: Optional[str] = None,
+    fecha_fin: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db)
+):
+    """
+    GET /api/v1/projects/{proyecto_id}/kpis/issues-detail
+    Retorna la lista detallada de incidencias que conforman el cálculo de un KPI (HU-015 - Drill-down).
+    Permite filtrar por tipo de métrica, sprint y rango de fechas.
+    """
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
+
+    query = db.query(models.Issue).filter(models.Issue.id_proyecto == proyecto_id)
+
+    if sprint_id:
+        query = query.filter(models.Issue.id_sprint == sprint_id)
+
+    # Filtrar según el tipo de métrica deseado
+    if metric_type in ("lead_time", "cycle_time", "throughput"):
+        query = query.filter(models.Issue.resolved_at.isnot(None))
+    elif metric_type == "bugs":
+        query = query.filter(models.Issue.status_actual.ilike("%bug%") | models.Issue.summary.ilike("%bug%"))
+
+    if fecha_inicio:
+        try:
+            dt_start = datetime.fromisoformat(fecha_inicio.replace("Z", "+00:00"))
+            query = query.filter(models.Issue.created_at >= dt_start)
+        except ValueError:
+            pass
+
+    if fecha_fin:
+        try:
+            dt_end = datetime.fromisoformat(fecha_fin.replace("Z", "+00:00"))
+            query = query.filter(models.Issue.created_at <= dt_end)
+        except ValueError:
+            pass
+
+    total_count = query.count()
+    issues = query.order_by(models.Issue.created_at.desc()).offset(offset).limit(limit).all()
+
+    mappings = mapping_repo.get_by_project_and_base(db, proyecto_id, "IN_PROGRESS")
+    in_prog_statuses = {m.estado_jira.lower() for m in mappings} if mappings else {"in progress", "en progreso", "desarrollo", "in development", "doing", "active"}
+
+    result = []
+    for issue in issues:
+        lead_time = 0.0
+        if issue.resolved_at and issue.created_at:
+            delta = issue.resolved_at - issue.created_at
+            lead_time = round(max(0.0, delta.total_seconds() / 86400.0), 2)
+
+        cycle_time = 0.0
+        if issue.resolved_at:
+            transitions = sorted(issue.transiciones, key=lambda t: t.fecha_cambio)
+            first_prog = None
+            for t in transitions:
+                if t.estado_nuevo and t.estado_nuevo.lower() in in_prog_statuses:
+                    first_prog = t.fecha_cambio
+                    break
+            if first_prog:
+                delta_c = issue.resolved_at - first_prog
+                cycle_time = round(max(0.0, delta_c.total_seconds() / 86400.0), 2)
+            else:
+                cycle_time = lead_time
+
+        sprint_nombre = issue.sprint_activo.nombre if issue.sprint_activo else "Sin Sprint"
+
+        result.append({
+            "id_jira": issue.id_jira,
+            "key_issue": issue.key_issue,
+            "summary": issue.summary,
+            "status_actual": issue.status_actual,
+            "story_points": float(issue.story_points or 0.0),
+            "created_at": issue.created_at.isoformat() if issue.created_at else None,
+            "resolved_at": issue.resolved_at.isoformat() if issue.resolved_at else None,
+            "lead_time_days": lead_time,
+            "cycle_time_days": cycle_time,
+            "sprint_nombre": sprint_nombre
+        })
+
+    return {
+        "proyecto_id": proyecto_id,
+        "total_issues": total_count,
+        "issues": result
+    }
 
 @router.get("/{proyecto_id}/sprints")
 async def get_project_sprints(

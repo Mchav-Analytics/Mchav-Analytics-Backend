@@ -7,7 +7,7 @@
 from app.core.database import Base
 
 # Modelos del dominio de autenticación y usuarios
-from .auth import Role, User
+from .auth import Role, User, UserProject
 
 # Modelos del dominio de Jira (Proyectos, Sprints, Issues, Transiciones, Mapeos de Estado)
 from .jira import issues_sprints, Proyecto, Sprint, Issue, TransicionEstadoIssue, MapeoEstado
@@ -20,6 +20,7 @@ __all__ = [
     "Base",
     "Role",
     "User",
+    "UserProject",
     "issues_sprints",
     "Proyecto",
     "Sprint",

@@ -26,6 +26,8 @@ venv/
 # Local databases
 *.db
 *.sqlite
+*.pdf
+test_report.pdf
 
 # Coverage report
 .coverage

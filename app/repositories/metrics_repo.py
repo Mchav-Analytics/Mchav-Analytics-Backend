@@ -33,6 +33,53 @@ class CRUDLog(CRUDBase[LogsSincronizacion]):
         """Obtiene los logs de sincronización más recientes ordenados descendentemente por fecha de ejecución."""
         return db.query(LogsSincronizacion).order_by(LogsSincronizacion.fecha_ejecucion.desc()).offset(skip).limit(limit).all()
 
+    def has_running_sync(self, db: Session) -> bool:
+        """HU-007 CA-03: Retorna True si ya existe una sincronización en proceso ('RUNNING')."""
+        count = db.query(LogsSincronizacion).filter(LogsSincronizacion.resultado == "RUNNING").count()
+        return count > 0
+
+    def get_filtered_logs(
+        self, 
+        db: Session, 
+        *, 
+        tipo_sincronizacion: str = None, 
+        resultado: str = None, 
+        fecha_inicio: str = None, 
+        fecha_fin: str = None, 
+        skip: int = 0, 
+        limit: int = 20
+    ):
+        """HU-008 CA-03: Permite consultar y filtrar registros de auditoría por tipo de evento, resultado y fechas."""
+        if not tipo_sincronizacion and not resultado and not fecha_inicio and not fecha_fin:
+            return self.get_recent(db, skip=skip, limit=limit)
+
+        query = db.query(LogsSincronizacion)
+
+        if tipo_sincronizacion:
+            query = query.filter(LogsSincronizacion.tipo_sincronizacion.ilike(f"%{tipo_sincronizacion}%"))
+
+        if resultado:
+            query = query.filter(LogsSincronizacion.resultado.ilike(f"%{resultado}%"))
+
+        if fecha_inicio:
+            try:
+                from datetime import datetime
+                dt_start = datetime.fromisoformat(fecha_inicio.replace("Z", "+00:00"))
+                query = query.filter(LogsSincronizacion.fecha_ejecucion >= dt_start)
+            except ValueError:
+                pass
+
+        if fecha_fin:
+            try:
+                from datetime import datetime
+                dt_end = datetime.fromisoformat(fecha_fin.replace("Z", "+00:00"))
+                query = query.filter(LogsSincronizacion.fecha_ejecucion <= dt_end)
+            except ValueError:
+                pass
+
+        return query.order_by(LogsSincronizacion.fecha_ejecucion.desc()).offset(skip).limit(limit).all()
+
 # Instancias singleton exportables
 kpi_repo = CRUDKpi(KpisHistoricos)
 log_repo = CRUDLog(LogsSincronizacion)
+
