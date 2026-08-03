@@ -78,16 +78,8 @@ async def get_jira_metrics(
     3. Total de tickets en desarrollo (In Progress)
     4. Bugs críticos con prioridad alta
     """
-<<<<<<< HEAD
     base_jira_url, headers = get_jira_auth_credentials(db, current_user)
     cache_key = f"metrics:{current_user.id_usuario}"
-=======
-    user_id = deps.get_current_user_id(request)
-    user = deps.check_user_exists(db, user_id)
-    
-    base_jira_url, headers = get_jira_auth_credentials(db, user)
-    cache_key = f"metrics:{user.id_usuario}"
->>>>>>> origin/Prueba_Desarrollo
     
     # 1. Verificar si existen métricas cacheadas no expiradas
     cached_data = metrics_cache.get(cache_key)
@@ -149,12 +141,6 @@ async def trigger_jira_sync(
     POST /api/v1/jira/sync
     Lanza el proceso de sincronización completa ETL como una tarea en segundo plano (BackgroundTask) no bloqueante.
     """
-<<<<<<< HEAD
-=======
-    user_id = deps.get_current_user_id(request)
-    user = deps.check_user_exists(db, user_id)
-        
->>>>>>> origin/Prueba_Desarrollo
     # Encolar la tarea asíncrona de sincronización
     background_tasks.add_task(run_jira_sync_task, current_user.id_usuario)
     return {"message": "Sincronización iniciada en segundo plano"}
@@ -174,12 +160,6 @@ async def get_sync_logs(
     GET /api/v1/jira/sync/logs
     Obtiene los registros de auditoría de sincronizaciones anteriores con paginación.
     """
-<<<<<<< HEAD
-=======
-    user_id = deps.get_current_user_id(request)
-    deps.check_user_exists(db, user_id)
-        
->>>>>>> origin/Prueba_Desarrollo
     logs = log_repo.get_recent(db, skip=offset, limit=limit)
     return logs
 
