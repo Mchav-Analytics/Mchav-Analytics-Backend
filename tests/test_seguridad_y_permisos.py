@@ -7,12 +7,11 @@ from app.models.auth import User, Role
 from app.api.v1 import deps
 
 def test_formato_firma_sesion_hmac():
-    """Prueba que la firma generada tenga el formato correcto: ID.FirmaSHA256"""
+    """Prueba que la función sign_session_id genere un Token JWT de 8 horas verificado por verify_session_id."""
     user_id = 5
     signed = sign_session_id(user_id)
-    assert signed.startswith("5.")
-    signature = signed.split(".")[1]
-    assert len(signature) == 64
+    verified_id = verify_session_id(signed)
+    assert verified_id == user_id
 
 def test_verificar_firma_sesion_valida():
     """Prueba que una firma auténtica se decodifique y valide correctamente"""
@@ -22,11 +21,11 @@ def test_verificar_firma_sesion_valida():
     assert verified_id == 5
 
 def test_rechazar_firma_sesion_alterada():
-    """Prueba que el sistema rechace el acceso si se altera la firma."""
+    """Prueba que el sistema rechace el acceso si se altera la firma del JWT."""
     user_id = 5
     signed = sign_session_id(user_id)
-    ultimo_caracter = "0" if signed[-1] != "0" else "1"
-    tampered_signed = signed[:-1] + ultimo_caracter
+    # Alterar un caracter en la firma del JWT
+    tampered_signed = signed[:20] + "X" + signed[21:]
     verified_id = verify_session_id(tampered_signed)
     assert verified_id is None
 
@@ -34,7 +33,7 @@ def test_rechazar_cambio_id_usuario_sesion():
     """Prueba que el sistema rechace si alguien intenta cambiar su ID de usuario."""
     user_id = 5
     signed = sign_session_id(user_id)
-    tampered_signed = "6" + signed[1:]
+    tampered_signed = signed[:35] + "99" + signed[37:]
     verified_id = verify_session_id(tampered_signed)
     assert verified_id is None
 

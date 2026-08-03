@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import FRONTEND_URL
 from app.core.database import get_db
-from app.core.security import sign_session_id, get_current_user, verify_password
+from app.core.security import sign_session_id, get_current_user, verify_password, encrypt_jira_token
 from app.repositories import user_repo
 from app.services import auth_service
 from app.schemas.auth_schema import JiraCredentialsPayload, UserResponse, JiraCredentialsResponse
@@ -77,10 +77,13 @@ async def save_jira_credentials(
     # Fusionamos el usuario en la sesión actual de base de datos 'db' para evitar el error de SQLAlchemy
     db_user = db.merge(current_user)
     
+    # Cifrado en reposo con Fernet (HU-006 - CA-03)
+    encrypted_token = encrypt_jira_token(verified_data["jira_api_token"])
+    
     user_repo.update(db, db_obj=db_user, obj_in={
         "jira_domain": verified_data["jira_domain"],
         "jira_email": verified_data["jira_email"],
-        "jira_api_token": verified_data["jira_api_token"],
+        "jira_api_token": encrypted_token,
         "api_token_vinculado": True
     })
     

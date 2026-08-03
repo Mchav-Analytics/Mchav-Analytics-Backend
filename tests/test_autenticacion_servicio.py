@@ -50,7 +50,7 @@ async def test_canjear_codigo_oauth_por_perfil_exitoso(mock_get, mock_post):
     mock_res_myself = MagicMock(status_code=200)
     mock_res_myself.json.return_value = {
         "accountId": "jira_acc_999",
-        "emailAddress": "testuser@mchav.com",
+        "emailAddress": "testuser@grupoasd.com",
         "displayName": "Test User"
     }
     
@@ -59,7 +59,7 @@ async def test_canjear_codigo_oauth_por_perfil_exitoso(mock_get, mock_post):
     user_data = await auth_service.exchange_code_for_user_profile("mock_code")
     
     assert user_data["jira_account_id"] == "jira_acc_999"
-    assert user_data["email"] == "testuser@mchav.com"
+    assert user_data["email"] == "testuser@grupoasd.com"
     assert user_data["nombre"] == "Test User"
     assert user_data["cloud_id"] == "cloud_id_123"
 

@@ -20,5 +20,11 @@ alembic==1.18.5
 # Suite de Pruebas Automatizadas y Asincronismo
 pytest==8.0.0
 anyio==4.14.1
-passlib[bcrypt]==1.7.4
-bcrypt==3.2.2
+# Autenticación JWT, Cifrado, Scheduler, Resiliencia y Reportes PDF
+pyjwt==2.13.0
+cryptography==50.0.0
+fpdf2==2.8.7
+apscheduler==3.11.3
+tenacity==8.2.3
+
+

@@ -53,17 +53,41 @@ def startup_event():
                 conn.commit()
             except Exception:
                 pass
+    # Creación automática de la tabla usuario_proyecto si no existe (HU-005)
+    models.Base.metadata.create_all(bind=engine)
+
     db = SessionLocal()
     try:
+        # Seeding de roles estándar del sistema (HU-004)
+        roles_default = [
+            {"nombre_rol": "Administrador", "scopes": "jira:read,jira:sync,projects:write,admin"},
+            {"nombre_rol": "Líder Técnico", "scopes": "jira:read,jira:sync,projects:write"},
+            {"nombre_rol": "Desarrollador", "scopes": "jira:read"}
+        ]
+        for r_info in roles_default:
+            r_exist = db.query(models.Role).filter(models.Role.nombre_rol == r_info["nombre_rol"]).first()
+            if not r_exist:
+                db.add(models.Role(nombre_rol=r_info["nombre_rol"], scopes=r_info["scopes"]))
+            elif not r_exist.scopes:
+                r_exist.scopes = r_info["scopes"]
+        db.commit()
+
         stuck_logs = db.query(LogsSincronizacion).filter(LogsSincronizacion.resultado == "RUNNING").all()
         for log in stuck_logs:
             log.resultado = "ERROR"
             log.detalle_error = "La sincronización se interrumpió debido a un reinicio del servidor."
         db.commit()
     except Exception as e:
-        print(f"Error limpiando logs atascados en inicio: {e}")
+        print(f"Error en inicio de servidor: {e}")
     finally:
         db.close()
+
+    # Iniciar motor de sincronización automática en segundo plano (HU-010)
+    try:
+        from app.core.scheduler import start_scheduler
+        start_scheduler()
+    except Exception as e:
+        print(f"Error iniciando scheduler: {e}")
 
 # -----------------------------------------------------------------------------
 # CONFIGURACIÓN DE MIDDLEWARE DE CORS

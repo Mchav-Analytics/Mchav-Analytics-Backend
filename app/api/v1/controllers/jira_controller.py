@@ -139,10 +139,17 @@ async def trigger_jira_sync(
 ):
     """
     POST /api/v1/jira/sync
-    Lanza el proceso de sincronización completa ETL como una tarea en segundo plano (BackgroundTask) no bloqueante.
+    Lanza el proceso de sincronización completa ETL como una tarea en segundo plano no bloqueante.
+    HU-007 CA-03: Si existe una sincronización en proceso, bloquea e informa al usuario.
     """
     user_id = deps.get_current_user_id(request)
     user = deps.check_user_exists(db, user_id)
+    
+    if log_repo.has_running_sync(db):
+        raise HTTPException(
+            status_code=400,
+            detail="Ya existe una sincronización en proceso de ejecución. Por favor espera a que finalice antes de iniciar una nueva."
+        )
         
     # Encolar la tarea asíncrona de sincronización
     background_tasks.add_task(run_jira_sync_task, user.id_usuario)
@@ -155,18 +162,33 @@ async def trigger_jira_sync(
 )
 async def get_sync_logs(
     request: Request,
+    tipo_sincronizacion: Optional[str] = None,
+    resultado: Optional[str] = None,
+    fecha_inicio: Optional[str] = None,
+    fecha_fin: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
     db: Session = Depends(get_db)
 ):
     """
     GET /api/v1/jira/sync/logs
-    Obtiene los registros de auditoría de sincronizaciones anteriores con paginación.
+    Obtiene los registros de auditoría de sincronizaciones con opciones de filtrado por tipo, estado y fechas (HU-008).
     """
     user_id = deps.get_current_user_id(request)
     deps.check_user_exists(db, user_id)
         
-    logs = log_repo.get_recent(db, skip=offset, limit=limit)
+    if not tipo_sincronizacion and not resultado and not fecha_inicio and not fecha_fin:
+        logs = log_repo.get_recent(db, skip=offset, limit=limit)
+    else:
+        logs = log_repo.get_filtered_logs(
+            db,
+            tipo_sincronizacion=tipo_sincronizacion,
+            resultado=resultado,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+            skip=offset,
+            limit=limit
+        )
     return logs
 
 @router.post(
