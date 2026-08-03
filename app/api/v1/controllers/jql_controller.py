@@ -1,7 +1,7 @@
 # app/api/v1/controllers/jql_controller.py
-# Controlador HTTP para consultas avanzadas JQL especializadas (Deltas, Velocidad, Throughput y Tiempos de Ciclo)
+# Controlador HTTP para ejecutar consultas JQL parametrizadas contra Jira
 
-from fastapi import APIRouter, Depends, Security
+from fastapi import APIRouter
 from datetime import datetime, timezone
 from typing import List
 from sqlalchemy.orm import Session
@@ -26,11 +26,8 @@ router = APIRouter()
     Evita tener que re-sincronizar toda la historia de Jira, optimizando recursos y tiempos de cálculo.
     """
 )
-async def get_extraction_delta(
-    project_key: str,
-    db: Session = Depends(get_db),
-    current_user: User = Security(get_current_user, scopes=["jira:read"])
-):
+async def get_extraction_delta(project_key: str):
+    """Genera y ejecuta la consulta JQL de extracción delta (-24h) para un proyecto."""
     jql = JQLQueries.DELTA_EXTRACTION.format(project_key=project_key)
     
     return JQLQueryResponse(
@@ -50,13 +47,8 @@ async def get_extraction_delta(
     y contabilizar el volumen neto de filas o tickets entregados (Throughput). 
     """
 )
-async def get_velocity_throughput(
-    project_key: str, 
-    status_done: str, 
-    sprint_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Security(get_current_user, scopes=["jira:read"])
-):
+async def get_velocity_throughput(project_key: str, status_done: str, sprint_id: int):
+    """Genera la consulta JQL parametrizada para obtener Velocity y Throughput de un sprint."""
     jql = JQLQueries.VELOCITY_THROUGHPUT.format(
         project_key=project_key, 
         status_done=status_done, 
@@ -79,13 +71,8 @@ async def get_velocity_throughput(
     Extrae ítems resueltos en un rango de fechas determinado para mapear el ciclo de vida y pre-computar promedios en días hábiles.
     """
 )
-async def get_time_cycles(
-    project_key: str, 
-    start_date: str, 
-    end_date: str,
-    db: Session = Depends(get_db),
-    current_user: User = Security(get_current_user, scopes=["jira:read"])
-):
+async def get_time_cycles(project_key: str, start_date: str, end_date: str):
+    """Genera la consulta JQL parametrizada para obtener los tickets resueltos en un rango de fechas."""
     jql = JQLQueries.TIME_CYCLES.format(
         project_key=project_key, 
         start_date=start_date, 

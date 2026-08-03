@@ -42,15 +42,18 @@ def verify_session_id(signed_value: str) -> int | None:
     return None
 
 # NUEVO: contexto de hashing para contraseñas locales (Password Flow)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+import bcrypt
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
     """Verifica una contraseña en texto plano contra su hash almacenado (bcrypt)."""
-    return pwd_context.verify(plain_password, password_hash)
+    try:
+        return bcrypt.checkpw(plain_password.encode('utf-8'), password_hash.encode('utf-8'))
+    except Exception:
+        return False
 
 def hash_password(plain_password: str) -> str:
     """Genera el hash bcrypt de una contraseña en texto plano."""
-    return pwd_context.hash(plain_password)
+    return bcrypt.hashpw(plain_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 # Esquema OAuth2 tipo "Authorization Code" para el flujo real de Atlassian.
 oauth2_scheme = OAuth2AuthorizationCodeBearer(

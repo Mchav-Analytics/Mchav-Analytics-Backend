@@ -11,8 +11,8 @@ httpx==0.26.0
 
 # Validación de Datos, Seguridad y ORM
 pydantic==2.6.1
-passlib[bcrypt]==1.7.4
-bcrypt==3.2.2
+
+# Base de Datos y ORM (PostgreSQL & SQLite)
 sqlalchemy==2.0.51
 psycopg2-binary==2.9.12
 alembic==1.18.5
@@ -20,3 +20,5 @@ alembic==1.18.5
 # Suite de Pruebas Automatizadas y Asincronismo
 pytest==8.0.0
 anyio==4.14.1
+passlib[bcrypt]==1.7.4
+bcrypt==3.2.2

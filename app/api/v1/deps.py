@@ -15,7 +15,7 @@ def get_current_user_id(request: Request, credentials: HTTPAuthorizationCredenti
     signed_session = None
     
     # 1. Intentar obtener el token desde la cabecera Authorization (Bearer)
-    if credentials:
+    if credentials and hasattr(credentials, "credentials"):
         signed_session = credentials.credentials
     
     # 2. Si no viene en la cabecera, buscar en las cookies (compatibilidad)

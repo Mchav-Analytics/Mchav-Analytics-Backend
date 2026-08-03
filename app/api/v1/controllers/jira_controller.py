@@ -5,7 +5,7 @@ import asyncio
 import httpx
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks, Security
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, ConfigDict
 
@@ -15,15 +15,12 @@ from app.services.kpi import calculate_and_save_kpis
 import app.models as models
 from app.repositories import user_repo, project_repo, sprint_repo, issue_repo, transition_repo, log_repo
 from app.core.cache import ShortLivedCache
-from app.core.security import get_current_user
-from app.models.auth import User
+from app.api.v1 import deps
 
 # Instancia global de la caché en memoria de 60 segundos
 metrics_cache = ShortLivedCache(ttl_seconds=60)
 
 # Esquemas de respuesta Pydantic
-
-# 1. Agrega este esquema junto con tus otros modelos Pydantic
 class JiraWebhookPayload(BaseModel):
     webhookEvent: Optional[str] = None
     timestamp: Optional[int] = None
@@ -67,8 +64,8 @@ router = APIRouter()
     summary="Obtener métricas rápidas con JQL"
 )
 async def get_jira_metrics(
-    db: Session = Depends(get_db),
-    current_user: User = Security(get_current_user, scopes=["jira:read"])
+    request: Request,
+    db: Session = Depends(get_db)
 ):
     """
     GET /api/v1/jira/metrics
@@ -78,8 +75,11 @@ async def get_jira_metrics(
     3. Total de tickets en desarrollo (In Progress)
     4. Bugs críticos con prioridad alta
     """
-    base_jira_url, headers = get_jira_auth_credentials(db, current_user)
-    cache_key = f"metrics:{current_user.id_usuario}"
+    user_id = deps.get_current_user_id(request)
+    user = deps.check_user_exists(db, user_id)
+    
+    base_jira_url, headers = get_jira_auth_credentials(db, user)
+    cache_key = f"metrics:{user.id_usuario}"
     
     # 1. Verificar si existen métricas cacheadas no expiradas
     cached_data = metrics_cache.get(cache_key)
@@ -133,16 +133,19 @@ async def get_jira_metrics(
     summary="Ejecutar motor ETL de Sincronización"
 )
 async def trigger_jira_sync(
+    request: Request,
     background_tasks: BackgroundTasks, 
-    db: Session = Depends(get_db),
-    current_user: User = Security(get_current_user, scopes=["jira:sync"])
+    db: Session = Depends(get_db)
 ):
     """
     POST /api/v1/jira/sync
     Lanza el proceso de sincronización completa ETL como una tarea en segundo plano (BackgroundTask) no bloqueante.
     """
+    user_id = deps.get_current_user_id(request)
+    user = deps.check_user_exists(db, user_id)
+        
     # Encolar la tarea asíncrona de sincronización
-    background_tasks.add_task(run_jira_sync_task, current_user.id_usuario)
+    background_tasks.add_task(run_jira_sync_task, user.id_usuario)
     return {"message": "Sincronización iniciada en segundo plano"}
 
 @router.get(
@@ -151,19 +154,21 @@ async def trigger_jira_sync(
     summary="Obtener historial de Sincronizaciones (Auditoría ETL)"
 )
 async def get_sync_logs(
+    request: Request,
     limit: int = 20,
     offset: int = 0,
-    db: Session = Depends(get_db),
-    current_user: User = Security(get_current_user, scopes=["jira:read"])
+    db: Session = Depends(get_db)
 ):
     """
     GET /api/v1/jira/sync/logs
     Obtiene los registros de auditoría de sincronizaciones anteriores con paginación.
     """
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
+        
     logs = log_repo.get_recent(db, skip=offset, limit=limit)
     return logs
 
-# 2. Modifica la firma del endpoint para que reciba el modelo
 @router.post(
     "/webhook",
     response_model=WebhookResponse,
@@ -175,7 +180,6 @@ async def jira_webhook(payload: JiraWebhookPayload, db: Session = Depends(get_db
     Endpoint receptor de eventos en tiempo real enviados por Jira (Webhooks).
     Actualiza o crea el ticket correspondiente y recalcula los KPIs del proyecto afectado de inmediato.
     """
-    # Como payload ya es un objeto, conviértelo a diccionario o accédelo por atributos
     data = payload.model_dump()
     issue_data = data.get("issue", {})
     
