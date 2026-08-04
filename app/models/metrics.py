@@ -45,3 +45,30 @@ class LogsSincronizacion(Base):
     issues_procesados = Column(Integer, default=0)                # Cantidad total de tickets extraídos/actualizados
     detalle_error = Column(Text, nullable=True)                  # Traceback o mensaje en caso de falla
     ejecutado_por = Column(String(100), default="SYSTEM_WORKER")  # Usuario que disparó el proceso o tarea del sistema
+
+class KpisDesarrollador(Base):
+    """
+    Modelo ORM que almacena capturas históricas de métricas individuales por desarrollador.
+    Tabla: 'kpis_desarrolladores'
+    """
+    __tablename__ = "kpis_desarrolladores"
+
+    id_kpi_dev = Column(Integer, primary_key=True, autoincrement=True)
+    id_proyecto = Column(String(50), ForeignKey("proyectos.id_proyecto", ondelete="CASCADE"), nullable=False)
+    id_sprint = Column(String(50), ForeignKey("sprints.id_sprint", ondelete="SET NULL"), nullable=True)
+    assignee_id = Column(String(100), nullable=False, index=True)
+    assignee_name = Column(String(150), nullable=False)
+    assignee_email = Column(String(200), nullable=True, index=True)
+    fecha_calculo = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Métricas calculadas individuales
+    throughput_issues = Column(Integer, default=0)
+    velocity_sp = Column(Numeric(10, 2), default=0.00)
+    cycle_time_promedio_dias = Column(Numeric(8, 2), default=0.00)
+    lead_time_promedio_dias = Column(Numeric(8, 2), default=0.00)
+    wip_actual = Column(Integer, default=0)
+    bugs_resueltos = Column(Integer, default=0)
+    bugs_totales = Column(Integer, default=0)
+    commitment_rate_pct = Column(Numeric(5, 2), default=0.00)
+    performance_score = Column(Numeric(5, 2), default=0.00)
+

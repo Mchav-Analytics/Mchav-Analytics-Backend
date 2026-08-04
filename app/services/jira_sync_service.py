@@ -209,6 +209,29 @@ async def sync_issues_for_project(
             if status_obj.get("statusCategory", {}).get("key") == "done":
                 fecha_fin = updated_at
 
+            # Extraer campos de asignación, tipo, prioridad y Story Points
+            assignee_obj = fields.get("assignee") or {}
+            assignee_id = assignee_obj.get("accountId") or "UNASSIGNED"
+            assignee_name = assignee_obj.get("displayName") or ("Sin Asignar" if assignee_id == "UNASSIGNED" else "Usuario Jira")
+            assignee_email = assignee_obj.get("emailAddress") or ""
+
+            itype_obj = fields.get("issuetype") or {}
+            issue_type = itype_obj.get("name", "Story")
+
+            priority_obj = fields.get("priority") or {}
+            priority = priority_obj.get("name", "Medium")
+
+            sp_val = fields.get("customfield_10028") or fields.get("customfield_10016") or fields.get("customfield_10026") or fields.get("storypoints") or fields.get("customfield_10020")
+            if isinstance(sp_val, (int, float)):
+                story_pts = float(sp_val)
+            elif isinstance(sp_val, str):
+                try:
+                    story_pts = float(sp_val)
+                except ValueError:
+                    story_pts = 0.0
+            else:
+                story_pts = 0.0
+
             db_issue = issue_repo.get_by_key(db, issue_key)
             i_data = {
                 "id_jira": issue_id,
@@ -216,9 +239,15 @@ async def sync_issues_for_project(
                 "id_proyecto": project.id_proyecto,
                 "summary": summary or "",
                 "status_actual": estado or "Unknown",
+                "story_points": story_pts,
                 "created_at": created_at,
                 "resolved_at": fecha_fin,
-                "id_sprint": sprint_id
+                "id_sprint": sprint_id,
+                "assignee_id": assignee_id,
+                "assignee_name": assignee_name,
+                "assignee_email": assignee_email,
+                "issue_type": issue_type,
+                "priority": priority
             }
             
             if not db_issue:
