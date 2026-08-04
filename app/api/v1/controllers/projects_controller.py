@@ -12,9 +12,10 @@ import app.models as models
 from app.repositories import user_repo, project_repo, kpi_repo, sprint_repo, issue_repo, transition_repo, mapping_repo
 from app.schemas.project_schema import ProjectResponse, ProjectMappingPayload
 from app.api.v1 import deps
+from app.core.security import get_current_user
 
 # Sub-router para la gestión de proyectos
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 @router.get("", response_model=list[ProjectResponse])
 @router.get("/", response_model=list[ProjectResponse])

@@ -17,6 +17,10 @@ def get_current_user_id(request: Request, credentials: HTTPAuthorizationCredenti
     # 1. Intentar obtener el token desde la cabecera Authorization (Bearer)
     if credentials and hasattr(credentials, "credentials"):
         signed_session = credentials.credentials
+    elif request.headers.get("Authorization"):
+        auth_header = request.headers.get("Authorization")
+        if auth_header.startswith("Bearer "):
+            signed_session = auth_header.split(" ")[1]
     
     # 2. Si no viene en la cabecera, buscar en las cookies (compatibilidad)
     if not signed_session:
@@ -43,4 +47,4 @@ def get_current_user(request: Request, db: Session = Depends(get_db), credential
         user_id = get_current_user_id(request, credentials)
         return user_repo.get(db, user_id)
     except Exception:
-        return None
+        return None

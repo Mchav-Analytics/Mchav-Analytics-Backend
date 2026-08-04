@@ -1,3 +1,6 @@
+# app/api/v1/controllers/jql_controller.py
+# Controlador HTTP para ejecutar consultas JQL parametrizadas contra Jira
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -15,7 +18,7 @@ from app.services.jira_sync import get_jira_auth_credentials
 from app.api.v1 import deps
 
 # Router principal para los endpoints de consultas JQL
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 class JQLExecutionPayload(BaseModel):
     jql: str

@@ -56,7 +56,8 @@ class WebhookResponse(BaseModel):
     issue: Optional[str] = None
 
 # Router principal del controlador de Jira
-router = APIRouter()
+from app.core.security import get_current_user
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 @router.get(
     "/metrics", 

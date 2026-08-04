@@ -12,6 +12,3 @@ api_router.include_router(projects_router, prefix="/projects", tags=["projects"]
 api_router.include_router(jql_router, prefix="/jql", tags=["jql"])             # /api/v1/jql
 api_router.include_router(reports_router, prefix="/reports", tags=["reports"])  # /api/v1/reports
 api_router.include_router(developers_router, prefix="/developers", tags=["developers"]) # /api/v1/developers
-
-
-
