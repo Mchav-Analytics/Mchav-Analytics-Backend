@@ -1,7 +1,7 @@
 # app/api/v1/controllers/jql_controller.py
 # Controlador HTTP para ejecutar consultas JQL parametrizadas contra Jira
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from datetime import datetime, timezone
 from typing import List
 from sqlalchemy.orm import Session
@@ -13,7 +13,7 @@ from app.schemas.jql import JQLQueryResponse, MetricSummarySchema, IssueBasicSch
 from app.core.jql_config import JQLQueries
 
 # Router principal para los endpoints de consultas JQL
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 @router.get(
     "/extraction-delta",

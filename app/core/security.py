@@ -69,24 +69,28 @@ oauth2_scheme = OAuth2AuthorizationCodeBearer(
 )
 
 # NUEVO: esquema de Password Flow, 100% local — no habla con Atlassian.
-# Aparece como una segunda opción de login en el popup "Available authorizations" de Swagger.
+# Aparece como una opción de login en el popup "Available authorizations" de Swagger.
 oauth2_password_scheme = OAuth2PasswordBearer(
     tokenUrl="/api/v1/auth/token",
     auto_error=False,
+    scopes={
+        "jira:read": "Leer datos de Jira (issues, boards, proyectos).",
+        "jira:sync": "Disparar sincronizaciones de datos con Jira.",
+        "projects:write": "Crear o modificar proyectos.",
+        "admin": "Acceso administrativo completo.",
+    }
 )
 
 def get_current_user(
     security_scopes: SecurityScopes,
     request: Request,
     db: Session = Depends(get_db),
-    token_header: Optional[str] = Depends(oauth2_scheme),
-    token_password: Optional[str] = Depends(oauth2_password_scheme),  # NUEVO
+    token: Optional[str] = Depends(oauth2_password_scheme),
 ) -> User:
     print("--- DEBUG AUTENTICACIÓN ---")
     print(f"Cookies recibidas en request: {request.cookies}")
     print(f"Cookie specific ({SESSION_COOKIE_NAME}): {request.cookies.get(SESSION_COOKIE_NAME)}")
-    print(f"Token en header Authorization (Atlassian): {token_header}")
-    print(f"Token en header Authorization (Password local): {token_password}")  # NUEVO
+    print(f"Token en header Authorization: {token}")
 
     authenticate_value = (
         f'Bearer scope="{security_scopes.scope_str}"' if security_scopes.scopes else "Bearer"
@@ -99,7 +103,7 @@ def get_current_user(
 
     # NUEVO: se acepta el token que venga primero disponible, sin importar el origen
     # (Atlassian OAuth2 o Password Flow local); si no hay ninguno, se cae a la cookie de sesión.
-    signed_value = token_header or token_password or request.cookies.get(SESSION_COOKIE_NAME)
+    signed_value = token or request.cookies.get(SESSION_COOKIE_NAME)
 
     user_id = verify_session_id(signed_value)
     print(f"User ID verificado por HMAC: {user_id}")
