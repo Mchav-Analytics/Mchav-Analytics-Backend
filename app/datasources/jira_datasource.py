@@ -108,12 +108,13 @@ class JiraDatasource:
         """
         Ejecuta una consulta JQL parametrizada con reintentos de resiliencia (Tenacity).
         """
+        fields_str = "summary,status,created,updated,issuetype,assignee,priority,sprint,customfield_10020,customfield_10028,customfield_10016,customfield_10026,storypoints"
         params = {
             "jql": jql,
             "startAt": start_at,
             "maxResults": max_results,
             "expand": "changelog",
-            "fields": "summary,status,created,updated,issuetype,assignee,priority,sprint,customfield_10020"
+            "fields": fields_str
         }
         
         # 1. Intentar con /search/jql (GET)
@@ -129,7 +130,7 @@ class JiraDatasource:
             "startAt": start_at,
             "maxResults": max_results,
             "expand": ["changelog"],
-            "fields": ["summary", "status", "created", "updated", "issuetype", "assignee", "priority", "sprint", "customfield_10020"]
+            "fields": fields_str.split(",")
         }
         res_post = await client.post(f"{base_url}/search/jql", headers=headers, json=payload)
         if res_post.status_code == 200:
