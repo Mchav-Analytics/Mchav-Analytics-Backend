@@ -36,3 +36,11 @@ def check_user_exists(db: Session, user_id: int):
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
     return user
+
+def get_current_user(request: Request, db: Session = Depends(get_db), credentials: HTTPAuthorizationCredentials = Security(security_scheme)):
+    """Dependencia que retorna el objeto User del usuario autenticado o None si es anónimo."""
+    try:
+        user_id = get_current_user_id(request, credentials)
+        return user_repo.get(db, user_id)
+    except Exception:
+        return None

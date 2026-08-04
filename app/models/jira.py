@@ -73,6 +73,13 @@ class Issue(Base):
     created_at = Column(DateTime(timezone=True), nullable=False) # Fecha exacta de creación del ticket
     resolved_at = Column(DateTime(timezone=True), nullable=True) # Fecha exacta en que pasó a estado finalizado
 
+    # Campos de asignación e información extendida
+    assignee_id = Column(String(100), nullable=True, index=True)      # accountId único de Atlassian Jira
+    assignee_name = Column(String(150), nullable=True)                 # Nombre completo visible
+    assignee_email = Column(String(200), nullable=True, index=True)    # Correo electrónico para vinculación
+    issue_type = Column(String(50), default="Story")                   # Tipo: Story, Bug, Task, Sub-task
+    priority = Column(String(30), default="Medium")                    # Prioridad: Highest, High, Medium, Low
+
     # Relaciones ORM
     proyecto = relationship("Proyecto", back_populates="issues")
     sprint_activo = relationship("Sprint", back_populates="issues_activos")
