@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.services.kpi import calculate_and_save_kpis
+from app.services.percentiles_service import calculate_percentiles
 import app.models as models
 from app.repositories import user_repo, project_repo, kpi_repo, sprint_repo, issue_repo, transition_repo, mapping_repo
 from app.schemas.project_schema import ProjectResponse, ProjectMappingPayload
@@ -288,3 +289,39 @@ async def save_project_mappings(
     calculate_and_save_kpis(db, proyecto_id)
     
     return {"message": "Mapeo guardado y KPIs recalculados con éxito"}
+
+@router.get("/{proyecto_id}/percentiles")
+async def get_project_percentiles(
+    request: Request,
+    proyecto_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    GET /api/v1/projects/{proyecto_id}/percentiles
+    [HU-014] Obtiene los percentiles P25, P50, P75, P90 del Lead Time y Cycle Time 
+    de los últimos 15 días, agrupados por tipo de tarea.
+    """
+    # Verificación de usuario
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
+    
+    # 1. Verificar si el proyecto existe
+    project = project_repo.get_by_key(db, proyecto_id) or project_repo.get(db, proyecto_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+        
+    real_project_id = project.id_proyecto
+
+    # 2. Obtener mapeo de estados "En Progreso" para el Cycle Time
+    mappings = mapping_repo.get_by_project_and_base(db, real_project_id, "IN_PROGRESS")
+    in_progress_statuses = {m.estado_jira.lower() for m in mappings}
+    if not in_progress_statuses:
+        in_progress_statuses = {"in progress", "en progreso", "desarrollo", "doing"}
+
+    # 3. Consultar la BD para obtener los tickets de los últimos 15 días
+    raw_issues = issue_repo.get_recent_resolved_issues_raw(db, real_project_id, in_progress_statuses, days=15)
+    
+    # 4. Delegar el cálculo estadístico al servicio
+    results = calculate_percentiles(raw_issues)
+    
+    return results

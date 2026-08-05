@@ -94,6 +94,9 @@ def startup_event():
 # -----------------------------------------------------------------------------
 origins = [
     FRONTEND_URL,
+    "http://localhost",
+    "http://127.0.0.1",
+    "http://localhost:5173"
 ]
 
 app.add_middleware(
