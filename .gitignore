@@ -6,8 +6,18 @@ __pycache__/
 .pytest_cache/
 .cache/
 
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
 # Environment variables
 .env
+.venv/
+venv/
 
 # IDE settings
 .vscode/
@@ -16,6 +26,11 @@ __pycache__/
 # Local databases
 *.db
 *.sqlite
+*.pdf
+test_report.pdf
+
+# Coverage report
+.coverage
 
 # Scratch scripts
 scratch/

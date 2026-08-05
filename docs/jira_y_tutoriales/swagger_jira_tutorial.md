@@ -1,82 +1,124 @@
-# Documentación y Pruebas con Swagger (FastAPI) 🚀
+# Documentación Interfaz OpenAPI y Swagger UI (FastAPI) 🚀
 
-En FastAPI, no tienes que escribir la documentación de Swagger a mano en un archivo extraño. **FastAPI genera la interfaz de Swagger automáticamente** leyendo el código Python. 
-
-Para ver tu Swagger ahora mismo, solo entra en tu navegador a:
-👉 **`http://localhost:8000/docs`**
-
-A continuación, te presento la documentación de nuestras queries y un tutorial práctico de cómo inyectarle descripciones hermosas a ese Swagger.
+**MCHAV Analytics** utiliza **OpenAPI 3.0** y **Swagger UI** generados dinámicamente por FastAPI. Toda la especificación de la API RESTful se autodocumenta a partir de los tipos de datos en Python, esquemas Pydantic V2 y decoradores de controladores.
 
 ---
 
-## 🔍 Parte 1: Documentación de las Queries JQL y Endpoints Actuales
+## 🌐 Direcciones de Acceso a la Documentación
 
-### 1. `GET /api/v1/jira/metrics` (Métricas Generales "Al Vuelo")
-Extrae estadísticas globales en tiempo real haciendo peticiones a Jira.
-* **JQL para Tickets Completados:** `statusCategory=Done` (Trae todo lo finalizado).
-* **JQL para Tickets en Progreso:** `statusCategory="In Progress"` (Trae el trabajo actual).
-* **JQL para Bugs Críticos:** `issuetype=Bug AND priority=Highest` (Identifica emergencias operativas).
+Cuando el servidor Backend está en ejecución (`uvicorn app.main:app` o `docker compose up`), la documentación interactiva está disponible en:
 
-### 2. `POST /api/v1/jira/sync` (Motor ETL de Sincronización)
-Arranca el proceso pesado para descargar toda la historia de tickets a nuestra base de datos PostgreSQL.
-* **JQL Principal:** `project='{LLAVE_DEL_PROYECTO}'`
-* **Parámetros extra:** Usa `expand=changelog` para traer el historial minuto a minuto de en qué estado estuvo cada ticket, vital para calcular Lead/Cycle Time.
-
-### 3. `GET /api/v1/jira/sync/logs` (Auditoría)
-No usa JQL. Lee nuestra tabla local de PostgreSQL (`LogsSincronizacion`) para retornar el estado de las últimas tareas de sincronización.
-
-### 4. `POST /api/v1/jira/webhook` (Eventos en Tiempo Real)
-No usa JQL. Es un "teléfono rojo" pasivo. Espera a que Jira le mande un mensaje automático (Payload) cada vez que alguien mueve un ticket en el tablero oficial.
+* ⚙️ **Swagger UI (Pruebas en Vivo):** [http://localhost:8000/docs](http://localhost:8000/docs)
+* 📄 **ReDoc (Documentación Estática):** [http://localhost:8000/redoc](http://localhost:8000/redoc)
+* 📋 **Esquema OpenAPI JSON:** [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json)
 
 ---
 
-## 🛠️ Parte 2: Tutorial - ¿Cómo documentar esto en Swagger?
+## 🔒 Autenticación de la Documentación en Swagger
 
-Para que tu interfaz en `http://localhost:8000/docs` se vea profesional, explique las queries y te permita hacer pruebas fácilmente, solo tienes que agregar tres cosas a tu código en `app/api/v1/endpoints/jira.py`:
+La interfaz de Swagger en `/docs` está protegida mediante **HTTP Basic Authentication** para evitar la exposición pública no autorizada del mapa de endpoints en producción.
 
-### Paso 1: Ponerle "Nombre" y "Descripción" al Endpoint
-Añade los parámetros `summary` y `description` al decorador `@router`. Puedes usar Markdown en la descripción.
+### Credenciales de Acceso a `/docs`:
+* **Usuario:** `admin` (Definido en la variable `DOCS_USER`)
+* **Contraseña:** `MchavDocs2026!Sec#Admin` (Definida en la variable `DOCS_PASSWORD`)
+
+> 💡 **Nota:** Al abrir `http://localhost:8000/docs` en el navegador, se desplegará una ventana emergente solicitando este usuario y contraseña antes de permitir visualizar la interfaz de Swagger.
+
+---
+
+## 🔍 Catálogo Completo de Endpoints Documentados en Swagger
+
+### 1. 🔑 Autenticación y Control de Acceso (`/api/v1/auth`)
+
+| Método | Endpoint | Descripción | Tipo de Auth |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/auth/login` | Redirecciona a Atlassian OAuth 2.0 (3LO) con estado CSRF | Pública |
+| `GET` | `/api/v1/auth/callback` | Procesa el código devuelto por Atlassian y genera cookie HMAC | OAuth Code |
+| `POST` | `/api/v1/auth/token` | Autenticación local mediante usuario y contraseña (Devuelve JWT Bearer) | Basic / Form |
+| `POST` | `/api/v1/auth/jira-credentials` | Registra credenciales directas de API Token (Jira Domain, Email, Token) | Bearer / Cookie |
+
+### 2. 📊 Métricas e Integración Jira (`/api/v1/jira`)
+
+| Método | Endpoint | Descripción | Respuesta / JQL |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/jira/metrics` | Obtiene métricas agregadas globales (Caché TTL de 60s) | JQL: `statusCategory=Done`, `statusCategory="In Progress"`, `issuetype=Bug AND priority=Highest` |
+| `POST` | `/api/v1/jira/sync` | Inicia la tarea asíncrona ETL de sincronización en segundo plano | Dispara `run_jira_sync_task` |
+| `GET` | `/api/v1/jira/sync/logs` | Consulta los logs históricos del proceso de sincronización | Auditoría PostgreSQL (`LogsSincronizacion`) |
+| `POST` | `/api/v1/jira/webhook` | Endpoint pasivo para recepción de eventos webhook de Jira | Procesa cambios de estado en tiempo real |
+
+### 3. 🎯 Consultas Especializadas JQL (`/api/v1/jql`)
+
+| Método | Endpoint | Parámetros Query | Propósito de la Consulta |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/jql/extraction-delta` | `project_key`, `updated_since` | Extrae tickets creados o modificados después de una fecha |
+| `GET` | `/api/v1/jql/velocity-throughput` | `project_key`, `status_done`, `sprint_id` | Consulta datos para cálculo de velocidad e ítems completados |
+| `GET` | `/api/v1/jql/time-cycles` | `project_key`, `start_date`, `end_date` | Filtra historias para análisis de Lead Time y Cycle Time |
+
+### 4. 📁 Gestión de Proyectos y Mapeos (`/api/v1/projects`)
+
+| Método | Endpoint | Descripción | Modelo DTO |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/projects/` | Lista todos los proyectos registrados con paginación | `list[ProjectResponse]` |
+| `GET` | `/api/v1/projects/{proyecto_id}/kpis` | Consulta el historial de KPIs calculados del proyecto | `list[KpisHistoricos]` |
+| `GET` | `/api/v1/projects/{proyecto_id}/sprints` | Lista los sprints asociados a un proyecto | `list[SprintResponse]` |
+| `GET` | `/api/v1/projects/{proyecto_id}/statuses` | Obtiene la lista única de nombres de estados para mapeos | `list[str]` |
+| `POST` | `/api/v1/projects/{proyecto_id}/mappings` | Reemplaza las reglas de mapeo de estados y recalculá KPIs | `list[ProjectMappingPayload]` |
+
+---
+
+## 🛠️ Guía Paso a Paso: ¿Cómo Documentar Endpoints en Swagger UI con FastAPI?
+
+Para asegurar que un controlador o endpoint se documente de manera clara y profesional en Swagger, se siguen tres estándares en el código Python de los controladores (`app/api/v1/controllers/`):
+
+### 1. Usar Metadatos en el Decorador del Router
+Se deben incluir los parámetros `summary`, `description`, `response_model` y `status_code`:
 
 ```python
+from fastapi import APIRouter, Depends, Request
+from app.schemas.project_schema import ProjectResponse
+
+router = APIRouter()
+
 @router.get(
-    "/metrics", 
-    summary="Obtener métricas rápidas con JQL",
+    "/",
+    response_model=list[ProjectResponse],
+    summary="Listar todos los proyectos sincronizados",
     description="""
-    Realiza 3 consultas **JQL** a Jira para obtener totales rápidos:
-    * `statusCategory=Done`
-    * `statusCategory="In Progress"`
-    * `issuetype=Bug AND priority=Highest`
+    Retorna la lista completa de proyectos registrados en **PostgreSQL**.
+    Soporta parámetros de ordenamiento y paginación:
+    * `limit`: Cantidad máxima de registros (default 100).
+    * `offset`: Desplazamiento inicial (default 0).
+    * `sort`: Campo de ordenamiento (`id_proyecto`, `nombre`).
+    * `order`: Sentido (`asc`, `desc`).
     """
 )
-async def get_jira_metrics(request: Request, db: Session = Depends(get_db)):
-    # ... tu código aquí
+async def get_projects(request: Request, limit: int = 100, offset: int = 0):
+    # Lógica del controlador...
+    pass
 ```
 
-### Paso 2: Explicar qué responde (Response Model)
-Swagger necesita saber cómo se ve el JSON de respuesta para mostrarte un ejemplo antes de que le des al botón "Try it out". Esto se hace creando una clase `Pydantic`.
+### 2. Definir Esquemas DTO con Pydantic y Ejemplos (Field Examples)
+Los modelos en `app/schemas/` utilizan `Field` con ejemplos claros para que Swagger muestre payloads interactivos:
 
 ```python
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-# Defines cómo se ve tu respuesta
-class MetricsResponse(BaseModel):
-    active_projects: int
-    completed_tickets: int
-    in_progress_tickets: int
-    critical_bugs: int
+class ProjectMappingPayload(BaseModel):
+    estado_jira: str = Field(..., example="In Development", description="Nombre del estado exacto en Jira Cloud")
+    estado_base: str = Field(..., example="IN_PROGRESS", description="Estado estándar de la plataforma (TO_DO, IN_PROGRESS, DONE)")
 
-# Se lo agregas al router
-@router.get("/metrics", response_model=MetricsResponse)
-async def get_jira_metrics(...):
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "estado_jira": "En Desarrollo",
+                "estado_base": "IN_PROGRESS"
+            }
+        }
 ```
 
-### Paso 3: Probarlo en vivo
-1. Guarda el archivo `jira.py`. Uvicorn recargará el servidor automáticamente.
-2. Entra a `http://localhost:8000/docs`.
-3. Busca tu endpoint, dale clic.
-4. Verás la descripción que escribiste y un botón enorme que dice **"Try it out"**.
-5. Dale clic y luego en **"Execute"** para hacer la prueba real desde ahí mismo.
-
----
-
-*💡 **¿Qué sigue?** Si quieres, puedo modificar el archivo `jira.py` ahora mismo aplicándole todas estas reglas de Swagger a tus 4 endpoints para que te queden listos para probar y presentar.*
+### 3. Autenticación Interactiva en Swagger UI ("Authorize")
+Para probar endpoints protegidos directamente en la interfaz de Swagger UI:
+1. Haz clic en el botón **"Authorize"** 🔓 en la esquina superior derecha de `http://localhost:8000/docs`.
+2. Introduce tu token en formato **Bearer Token** o la cookie de sesión.
+3. Haz clic en **"Authorize"** y cierra la ventana emergente.
+4. Ahora podrás usar el botón **"Try it out"** y **"Execute"** en cualquier endpoint para probar respuestas en vivo.

@@ -1,10 +1,31 @@
+# Framework Web y Servidor ASGI
 fastapi==0.109.2
 uvicorn[standard]==0.27.1
+python-multipart==0.0.20
+
+# Variables de Entorno y Configuración
 python-dotenv==1.0.1
+
+# Cliente HTTP Asíncrono (Jira API Rest v3 / Agile 1.0)
 httpx==0.26.0
+
+# Validación de Datos, Seguridad y ORM
 pydantic==2.6.1
 
-sqlalchemy
-psycopg2-binary
+# Base de Datos y ORM (PostgreSQL & SQLite)
+sqlalchemy==2.0.51
+psycopg2-binary==2.9.12
+alembic==1.18.5
+
+# Suite de Pruebas Automatizadas y Asincronismo
 pytest==8.0.0
-alembic
+anyio==4.14.1
+# Autenticación JWT, Cifrado, Scheduler, Resiliencia y Reportes PDF
+pyjwt==2.13.0
+cryptography==50.0.0
+bcrypt==4.1.2
+fpdf2==2.8.7
+apscheduler==3.11.3
+tenacity==8.2.3
+
+

@@ -26,8 +26,7 @@ SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "mchav_default_secret_key_1
 # URL del Frontend (React/Vite) permitida para políticas CORS
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").strip()
 
-# URL de conexión a la base de datos relacional (PostgreSQL o SQLite para pruebas)
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL") or "sqlite:///./mchav.db"
 
 # -----------------------------------------------------------------------------
 # CREDENCIALES DE API TOKEN DE JIRA (FALLBACK DEL SISTEMA Y BASIC AUTH)
@@ -40,6 +39,13 @@ JIRA_EMAIL = os.getenv("JIRA_EMAIL", "").strip()
 
 # Token de API generado en la consola de Atlassian para acceso programático
 JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "").strip()
+
+# -----------------------------------------------------------------------------
+# SESIÓN Y COOKIES DE AUTENTICACIÓN DE USUARIO
+# -----------------------------------------------------------------------------
+# Nombre de la cookie HTTP-Only donde se almacena el ID de usuario firmado (HMAC).
+# DEBE coincidir con el nombre usado en response.set_cookie(...) al hacer login.
+SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "session_id").strip()
 
 # -----------------------------------------------------------------------------
 # SEGURIDAD Y PROTECCIÓN DE LA DOCUMENTACIÓN OPENAPI / SWAGGER (/docs)
