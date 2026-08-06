@@ -79,6 +79,9 @@ class Issue(Base):
     assignee_email = Column(String(200), nullable=True, index=True)    # Correo electrónico para vinculación
     issue_type = Column(String(50), default="Story")                   # Tipo: Story, Bug, Task, Sub-task
     priority = Column(String(30), default="Medium")                    # Prioridad: Highest, High, Medium, Low
+    epic_key = Column(String(50), nullable=True)                        # Clave de la épica contenedora (ej: 'MCHAV-10')
+    epic_name = Column(String(150), nullable=True)                      # Nombre descriptivo de la épica
+    components = Column(Text, nullable=True)                             # Lista separada por comas de componentes Jira
 
     # Relaciones ORM
     proyecto = relationship("Proyecto", back_populates="issues")

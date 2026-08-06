@@ -200,7 +200,13 @@ async def get_project_kpis_issues_detail(
             "resolved_at": issue.resolved_at.isoformat() if issue.resolved_at else None,
             "lead_time_days": lead_time,
             "cycle_time_days": cycle_time,
-            "sprint_nombre": sprint_nombre
+            "sprint_nombre": sprint_nombre,
+            "assignee_name": getattr(issue, "assignee_name", None) or "Sin Asignar",
+            "issue_type": getattr(issue, "issue_type", None) or "Story",
+            "priority": getattr(issue, "priority", None) or "Medium",
+            "epic_key": getattr(issue, "epic_key", None),
+            "epic_name": getattr(issue, "epic_name", None),
+            "components": getattr(issue, "components", None)
         })
 
     return {

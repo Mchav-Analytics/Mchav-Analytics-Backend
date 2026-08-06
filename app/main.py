@@ -60,7 +60,10 @@ def startup_event():
         ("assignee_name", "VARCHAR(150)"),
         ("assignee_email", "VARCHAR(200)"),
         ("issue_type", "VARCHAR(50) DEFAULT 'Story'"),
-        ("priority", "VARCHAR(30) DEFAULT 'Medium'")
+        ("priority", "VARCHAR(30) DEFAULT 'Medium'"),
+        ("epic_key", "VARCHAR(50)"),
+        ("epic_name", "VARCHAR(150)"),
+        ("components", "TEXT")
     ]
     with engine.connect() as conn:
         for col_name, col_type in issue_columns:
