@@ -1,7 +1,7 @@
 # app/main.py
 # Punto de entrada principal de la aplicación web FastAPI
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
@@ -134,8 +134,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Registrar el router maestro
+@app.middleware("http")
+async def add_no_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+# Registrar el router maestro (soporta tanto /api/v1 como /api)
 app.include_router(api_router, prefix="/api/v1")
+app.include_router(api_router, prefix="/api")
 
 @app.get("/")
 def read_root():

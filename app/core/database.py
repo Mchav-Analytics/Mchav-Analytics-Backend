@@ -6,8 +6,8 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.core.config import DATABASE_URL
 
-# Crear motor de conexión principal usando la URL configurada en DATABASE_URL
-engine = create_engine(DATABASE_URL)
+connect_args = {"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 
 # Fábrica de sesiones ORM individuales para cada petición HTTP
 # autocommit=False: Requiere un commit explícito para confirmar transacciones

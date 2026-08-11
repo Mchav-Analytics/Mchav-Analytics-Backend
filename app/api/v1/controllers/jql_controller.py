@@ -106,11 +106,12 @@ async def execute_custom_jql(
                 jql=payload.jql,
                 max_results=payload.max_results or 50
             )
+            issues_list = res_data.get("issues", [])
             return {
                 "status": "success",
                 "jql_executed": payload.jql,
-                "total": res_data.get("total", 0),
-                "issues": res_data.get("issues", [])
+                "total": res_data.get("total", len(issues_list)),
+                "issues": issues_list
             }
     except Exception as e:
         if isinstance(e, HTTPException):
@@ -119,6 +120,38 @@ async def execute_custom_jql(
             status_code=400,
             detail=f"Error al ejecutar la consulta JQL en Jira: {str(e)}"
         )
+
+@router.get(
+    "/presets",
+    summary="Obtener Diccionario de Consultas JQL Recomendadas",
+    description="Retorna el catálogo predefinido de consultas JQL estructuradas por categorías para proyectos."
+)
+def get_jql_presets(project_key: str = "SCRUM"):
+    key = project_key.strip().upper() if project_key else "SCRUM"
+    return {
+        "status": "success",
+        "project_key": key,
+        "categories": [
+            {
+                "category": "Consultas Básicas del Proyecto",
+                "queries": [
+                    { "id": "all", "nombre": "Todas las Incidencias del Proyecto", "jql": f'project = "{key}"', "description": "Obtiene la totalidad de incidencias del proyecto." },
+                    { "id": "todo", "nombre": "Pendientes por Iniciar (To Do)", "jql": f'project = "{key}" AND status = "To Do"', "description": "Incidencias registradas aún no iniciadas." },
+                    { "id": "in_progress", "nombre": "En Progreso (Trabajo Activo)", "jql": f'project = "{key}" AND status = "In Progress"', "description": "Incidencias en desarrollo actualmente." },
+                    { "id": "done", "nombre": "Completadas (Done)", "jql": f'project = "{key}" AND status = "Done"', "description": "Incidencias finalizadas con éxito." }
+                ]
+            },
+            {
+                "category": "Filtros de Control Operativo y Calidad",
+                "queries": [
+                    { "id": "high_priority", "nombre": "Alta Prioridad / Críticos Pendientes", "jql": f'project = "{key}" AND priority in (High, Highest) AND status != "Done"', "description": "Incidencias críticas pendientes de solución." },
+                    { "id": "unassigned", "nombre": "Incidencias Sin Asignar", "jql": f'project = "{key}" AND assignee is EMPTY AND status != "Done"', "description": "Tareas pendientes sin responsable asignado." },
+                    { "id": "bugs", "nombre": "Bugs y Errores Activos", "jql": f'project = "{key}" AND issuetype = Bug AND status != "Done"', "description": "Fallas o bugs en estado activo." },
+                    { "id": "recent_7d", "nombre": "Actualizadas en los últimos 7 días", "jql": f'project = "{key}" AND updated >= -7d ORDER BY updated DESC', "description": "Histórico reciente de cambios." }
+                ]
+            }
+        ]
+    }
 
 @router.get(
     "/extraction-delta",

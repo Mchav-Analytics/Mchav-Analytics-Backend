@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import FRONTEND_URL
 from app.core.database import get_db
-from app.core.security_deps import get_current_user_id  # 👈 Importamos la dependencia dual
+from app.core.security import sign_session_id
+from app.api.v1.deps import get_current_user_id  # 👈 Importamos la dependencia dual
 from app.repositories import user_repo
 from app.services import auth_service
 
@@ -144,19 +145,26 @@ async def callback(code: str, state: str, db: Session = Depends(get_db)):
     else:
         user = user_repo.update(db, db_obj=user, obj_in=u_data)
         
-    # 1. Creamos la redirección hacia el frontend
-    redirect = RedirectResponse(url=f"{FRONTEND_URL}/dashboard?login=success")
+    signed_session = sign_session_id(user.id_usuario)
+
+    # 1. Creamos la redirección hacia el frontend con token token como fallback
+    redirect = RedirectResponse(url=f"{FRONTEND_URL}/dashboard?login=success&token={signed_session}", status_code=302)
     
-    # 2. Firmamos el ID de usuario tal como lo espera la seguridad
-    signed_session = auth_service.sign_session_id(user.id_usuario) if hasattr(auth_service, 'sign_session_id') else user_repo.sign_session_id(user.id_usuario)
-    
-    # 3. Inyectamos la cookie HTTP-Only en la respuesta de redirección
+    # 2. Inyectamos la cookie HTTP-Only en la respuesta de redirección
     redirect.set_cookie(
         key="session_id", 
         value=signed_session, 
         httponly=True, 
-        samesite='lax', 
-        max_age=3600*24
+        samesite='lax',
+        path='/'
     )
     
     return redirect
+
+@router.post("/logout", summary="Cerrar sesión")
+@router.get("/logout", summary="Cerrar sesión")
+def logout():
+    from fastapi.responses import JSONResponse
+    res = JSONResponse(content={"status": "success", "message": "Sesión cerrada correctamente."})
+    res.delete_cookie(key="session_id", path="/")
+    return res

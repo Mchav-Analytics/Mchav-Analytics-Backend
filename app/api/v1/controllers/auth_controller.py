@@ -174,7 +174,7 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
 
     signed_session = sign_session_id(user.id_usuario)
 
-    redirect = RedirectResponse(url=f"{FRONTEND_URL}/dashboard", status_code=307)
+    redirect = RedirectResponse(url=f"{FRONTEND_URL}/dashboard?login=success&token={signed_session}", status_code=302)
     redirect.set_cookie(
         key="session_id",
         value=signed_session,
@@ -274,3 +274,14 @@ async def login_local(
     signed_session = sign_session_id(user.id_usuario)
 
     return {"access_token": signed_session, "token_type": "bearer"}
+
+@router.post("/logout", summary="Cerrar sesión")
+@router.get("/logout", summary="Cerrar sesión")
+def logout():
+    """
+    Cierra la sesión del usuario eliminando la cookie de sesión HTTP-Only (session_id).
+    """
+    from fastapi.responses import JSONResponse
+    res = JSONResponse(content={"status": "success", "message": "Sesión cerrada correctamente."})
+    res.delete_cookie(key="session_id", path="/")
+    return res
