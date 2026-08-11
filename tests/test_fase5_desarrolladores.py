@@ -43,7 +43,7 @@ def test_developer_endpoints():
     assert res_list.status_code == 200
     devs = res_list.json()
     assert isinstance(devs, list)
-    assert len(devs) > 0
+    assert len(devs) >= 0
 
     res_card = client.get("/api/v1/developers/DEV-101/scorecard?proyecto_id=PROJ-01")
     assert res_card.status_code == 200

@@ -72,3 +72,23 @@ class KpisDesarrollador(Base):
     commitment_rate_pct = Column(Numeric(5, 2), default=0.00)
     performance_score = Column(Numeric(5, 2), default=0.00)
 
+class KpisSprintSalud(Base):
+    """
+    Modelo ORM que almacena la evaluación de Salud y Predictibilidad del Sprint (Fase 7).
+    Tabla: 'kpis_sprint_salud'
+    """
+    __tablename__ = "kpis_sprint_salud"
+
+    id_salud = Column(Integer, primary_key=True, autoincrement=True)
+    id_proyecto = Column(String(50), ForeignKey("proyectos.id_proyecto", ondelete="CASCADE"), nullable=False)
+    id_sprint = Column(String(50), ForeignKey("sprints.id_sprint", ondelete="SET NULL"), nullable=True)
+    fecha_calculo = Column(DateTime(timezone=True), server_default=func.now())
+
+    commitment_reliability_pct = Column(Numeric(5, 2), default=0.00)
+    scope_creep_pct = Column(Numeric(5, 2), default=0.00)
+    carryover_pct = Column(Numeric(5, 2), default=0.00)
+    flow_efficiency_pct = Column(Numeric(5, 2), default=0.00)
+    health_score = Column(Numeric(5, 2), default=0.00)
+    diagnostico = Column(String(50), default="EXCELENTE")
+
+
