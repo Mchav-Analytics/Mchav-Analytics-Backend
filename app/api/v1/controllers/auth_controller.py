@@ -92,6 +92,53 @@ async def save_jira_credentials(
         "message": "Credenciales de API Token de Jira vinculadas y verificadas con éxito."
     }
 
+from pydantic import BaseModel
+
+class MockLoginPayload(BaseModel):
+    email: str
+    role: str = None
+
+@router.post(
+    "/login",
+    summary="Login de desarrollo",
+    description="Endpoint POST para iniciar sesión sin OAuth desde la UI de desarrollo."
+)
+async def login_post(payload: MockLoginPayload, response: Response, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == payload.email).first()
+    if not user:
+        # Crea el usuario si no existe (para entorno dev)
+        rol = db.query(Role).filter(Role.nombre_rol == ("Administrador" if payload.role == "ADMIN" else "Desarrollador")).first()
+        user = user_repo.create(db, obj_in={
+            "email": payload.email,
+            "nombre": payload.email.split("@")[0],
+            "id_rol": rol.id_rol if rol else 1,
+            "activo": True
+        })
+    
+    signed_session = sign_session_id(user.id_usuario)
+    response.set_cookie(
+        key="session_id",
+        value=signed_session,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        path="/"
+    )
+    rol_nombre = user.rol.nombre_rol if user.rol else None
+    return {
+        "id_usuario": user.id_usuario,
+        "email": user.email,
+        "nombre": user.nombre,
+        "id_rol": user.id_rol,
+        "rol": rol_nombre,
+        "activo": user.activo,
+        "jira_account_id": user.jira_account_id,
+        "cloud_id": user.cloud_id,
+        "jira_domain": user.jira_domain,
+        "jira_email": user.jira_email,
+        "api_token_vinculado": user.api_token_vinculado
+    }
+
 @router.get(
     "/login",
     summary="Iniciar sesión con Atlassian",

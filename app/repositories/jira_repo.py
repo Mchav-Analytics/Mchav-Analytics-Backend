@@ -5,6 +5,7 @@
 from typing import Optional, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, case
+import datetime
 from app.models.jira import Proyecto, Sprint, Issue, TransicionEstadoIssue, MapeoEstado
 from app.repositories.base import CRUDBase
 
@@ -143,6 +144,50 @@ class CRUDIssue(CRUDBase[Issue]):
             Issue.id_sprint == sprint_id,
             Issue.resolved_at.isnot(None)
         ).first()
+
+    def get_recent_resolved_issues_raw(self, db: Session, project_id: str, in_progress_statuses: set[str], days: int = 15):
+        """
+        [HU-014] Obtiene los tiempos crudos (lead time, cycle time) de los tickets resueltos 
+        en los últimos N días para un proyecto, agrupables por tipo de tarea.
+        Se utiliza para el cálculo dinámico de percentiles P25, P50, P75, P90.
+        """
+        dialect_name = db.bind.dialect.name
+        
+        # Calcular fecha límite hace N días
+        date_limit = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+        
+        # Subconsulta para determinar inicio real del ticket (para Cycle Time)
+        first_progress_date_sub = select(
+            func.min(TransicionEstadoIssue.fecha_cambio)
+        ).where(
+            TransicionEstadoIssue.id_jira == Issue.id_jira,
+            func.lower(TransicionEstadoIssue.estado_nuevo).in_(list(in_progress_statuses))
+        ).scalar_subquery()
+        
+        # Compatibilidad SQLite vs PostgreSQL
+        if dialect_name == "sqlite":
+            lead_time_expr = func.julianday(Issue.resolved_at) - func.julianday(Issue.created_at)
+            start_date_expr = func.coalesce(first_progress_date_sub, Issue.created_at)
+            cycle_time_expr = func.julianday(Issue.resolved_at) - func.julianday(start_date_expr)
+        else:
+            lead_time_expr = func.extract('epoch', Issue.resolved_at - Issue.created_at) / 86400.0
+            start_date_expr = func.coalesce(first_progress_date_sub, Issue.created_at)
+            cycle_time_expr = func.extract('epoch', Issue.resolved_at - start_date_expr) / 86400.0
+            
+        # Evitamos tiempos negativos (clipeado a 0)
+        lead_time_clipped = case((lead_time_expr > 0.0, lead_time_expr), else_=0.0).label("lead_time")
+        cycle_time_clipped = case((cycle_time_expr > 0.0, cycle_time_expr), else_=0.0).label("cycle_time")
+        
+        # Devolvemos el tipo y los tiempos de cada ticket
+        return db.query(
+            Issue.issue_type,
+            lead_time_clipped,
+            cycle_time_clipped
+        ).filter(
+            Issue.id_proyecto == project_id,
+            Issue.resolved_at.isnot(None),
+            Issue.resolved_at >= date_limit
+        ).all()
 
 class CRUDTransicion(CRUDBase[TransicionEstadoIssue]):
     """Repositorio para la gestión del historial de transiciones de estado."""
