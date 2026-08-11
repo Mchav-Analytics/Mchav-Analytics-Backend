@@ -136,17 +136,17 @@ def get_jql_presets(project_key: str = "SCRUM"):
                 "category": "Consultas Básicas del Proyecto",
                 "queries": [
                     { "id": "all", "nombre": "Todas las Incidencias del Proyecto", "jql": f'project = "{key}"', "description": "Obtiene la totalidad de incidencias del proyecto." },
-                    { "id": "todo", "nombre": "Pendientes por Iniciar (To Do)", "jql": f'project = "{key}" AND status = "To Do"', "description": "Incidencias registradas aún no iniciadas." },
-                    { "id": "in_progress", "nombre": "En Progreso (Trabajo Activo)", "jql": f'project = "{key}" AND status = "In Progress"', "description": "Incidencias en desarrollo actualmente." },
-                    { "id": "done", "nombre": "Completadas (Done)", "jql": f'project = "{key}" AND status = "Done"', "description": "Incidencias finalizadas con éxito." }
+                    { "id": "todo", "nombre": "Pendientes por Iniciar (To Do)", "jql": f'project = "{key}" AND status in ("To Do", "Por hacer", "Pendiente")', "description": "Incidencias registradas aún no iniciadas." },
+                    { "id": "in_progress", "nombre": "En Progreso (Trabajo Activo)", "jql": f'project = "{key}" AND status in ("In Progress", "En curso")', "description": "Incidencias en desarrollo actualmente." },
+                    { "id": "done", "nombre": "Completadas (Done)", "jql": f'project = "{key}" AND status in ("Done", "Finalizado", "Completado")', "description": "Incidencias finalizadas con éxito." }
                 ]
             },
             {
                 "category": "Filtros de Control Operativo y Calidad",
                 "queries": [
-                    { "id": "high_priority", "nombre": "Alta Prioridad / Críticos Pendientes", "jql": f'project = "{key}" AND priority in (High, Highest) AND status != "Done"', "description": "Incidencias críticas pendientes de solución." },
-                    { "id": "unassigned", "nombre": "Incidencias Sin Asignar", "jql": f'project = "{key}" AND assignee is EMPTY AND status != "Done"', "description": "Tareas pendientes sin responsable asignado." },
-                    { "id": "bugs", "nombre": "Bugs y Errores Activos", "jql": f'project = "{key}" AND issuetype = Bug AND status != "Done"', "description": "Fallas o bugs en estado activo." },
+                    { "id": "high_priority", "nombre": "Alta Prioridad / Críticos Pendientes", "jql": f'project = "{key}" AND priority in (High, Highest, Alta) AND status not in ("Done", "Finalizado", "Completado")', "description": "Incidencias críticas pendientes de solución." },
+                    { "id": "unassigned", "nombre": "Incidencias Sin Asignar", "jql": f'project = "{key}" AND assignee is EMPTY AND status not in ("Done", "Finalizado", "Completado")', "description": "Tareas pendientes sin responsable asignado." },
+                    { "id": "bugs", "nombre": "Bugs y Errores Activos", "jql": f'project = "{key}" AND issuetype in (Bug, Error) AND status not in ("Done", "Finalizado", "Completado")', "description": "Fallas o bugs en estado activo." },
                     { "id": "recent_7d", "nombre": "Actualizadas en los últimos 7 días", "jql": f'project = "{key}" AND updated >= -7d ORDER BY updated DESC', "description": "Histórico reciente de cambios." }
                 ]
             }
