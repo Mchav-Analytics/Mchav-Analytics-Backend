@@ -232,6 +232,25 @@ async def sync_issues_for_project(
             else:
                 story_pts = 0.0
 
+            # Extraer Épica contenedora
+            parent_obj = fields.get("parent") or {}
+            epic_field = fields.get("epic") or fields.get("customfield_10014") or {}
+            epic_key = None
+            epic_name = None
+            if isinstance(parent_obj, dict) and parent_obj.get("key"):
+                epic_key = parent_obj.get("key")
+                epic_name = parent_obj.get("fields", {}).get("summary") or parent_obj.get("summary")
+            elif isinstance(epic_field, dict):
+                epic_key = epic_field.get("key")
+                epic_name = epic_field.get("name") or epic_field.get("summary")
+            elif isinstance(epic_field, str):
+                epic_key = epic_field
+
+            # Extraer Componentes
+            comps_list = fields.get("components") or []
+            comp_names = [c.get("name") for c in comps_list if isinstance(c, dict) and c.get("name")]
+            components_str = ", ".join(comp_names) if comp_names else None
+
             db_issue = issue_repo.get_by_key(db, issue_key)
             i_data = {
                 "id_jira": issue_id,
@@ -247,7 +266,10 @@ async def sync_issues_for_project(
                 "assignee_name": assignee_name,
                 "assignee_email": assignee_email,
                 "issue_type": issue_type,
-                "priority": priority
+                "priority": priority,
+                "epic_key": epic_key,
+                "epic_name": epic_name,
+                "components": components_str
             }
             
             if not db_issue:

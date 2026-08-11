@@ -14,8 +14,30 @@ from app.schemas.project_schema import ProjectResponse, ProjectMappingPayload
 from app.api.v1 import deps
 from app.core.security import get_current_user
 
+from app.services.sprint_health_service import calculate_sprint_health
+
 # Sub-router para la gestión de proyectos
 router = APIRouter(dependencies=[Depends(get_current_user)])
+
+@router.get("/{proyecto_id}/health")
+@router.get("/{proyecto_id}/sprints/{sprint_id}/health")
+async def get_sprint_health_metrics(
+    proyecto_id: str,
+    sprint_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    GET /api/v1/projects/{proyecto_id}/health
+    Retorna la salud del sprint, commitment reliability, scope creep, flow efficiency y alertas (Fase 7).
+    """
+    try:
+        return calculate_sprint_health(db, proyecto_id, sprint_id)
+    except Exception as e:
+        if db:
+            db.rollback()
+        print("Error en get_sprint_health_metrics:", e)
+        return calculate_sprint_health(None, proyecto_id, sprint_id)
+
 
 @router.get("", response_model=list[ProjectResponse])
 @router.get("/", response_model=list[ProjectResponse])
@@ -179,7 +201,13 @@ async def get_project_kpis_issues_detail(
             "resolved_at": issue.resolved_at.isoformat() if issue.resolved_at else None,
             "lead_time_days": lead_time,
             "cycle_time_days": cycle_time,
-            "sprint_nombre": sprint_nombre
+            "sprint_nombre": sprint_nombre,
+            "assignee_name": getattr(issue, "assignee_name", None) or "Sin Asignar",
+            "issue_type": getattr(issue, "issue_type", None) or "Story",
+            "priority": getattr(issue, "priority", None) or "Medium",
+            "epic_key": getattr(issue, "epic_key", None),
+            "epic_name": getattr(issue, "epic_name", None),
+            "components": getattr(issue, "components", None)
         })
 
     return {

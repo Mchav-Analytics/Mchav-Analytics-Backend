@@ -53,6 +53,30 @@ def startup_event():
                 conn.commit()
             except Exception:
                 pass
+
+    # Migración dinámica de columnas para la tabla issues (Fase 5 y 6)
+    issue_columns = [
+        ("assignee_id", "VARCHAR(100)"),
+        ("assignee_name", "VARCHAR(150)"),
+        ("assignee_email", "VARCHAR(200)"),
+        ("issue_type", "VARCHAR(50) DEFAULT 'Story'"),
+        ("priority", "VARCHAR(30) DEFAULT 'Medium'"),
+        ("epic_key", "VARCHAR(50)"),
+        ("epic_name", "VARCHAR(150)"),
+        ("components", "TEXT")
+    ]
+    with engine.connect() as conn:
+        for col_name, col_type in issue_columns:
+            try:
+                conn.execute(text(f"ALTER TABLE issues ADD COLUMN IF NOT EXISTS {col_name} {col_type};"))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.execute(text(f"ALTER TABLE issues ADD COLUMN {col_name} {col_type};"))
+                    conn.commit()
+                except Exception:
+                    pass
+
     # Creación automática de la tabla usuario_proyecto si no existe (HU-005)
     models.Base.metadata.create_all(bind=engine)
 
@@ -96,11 +120,13 @@ origins = [
     FRONTEND_URL,
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"] if FRONTEND_URL == "*" else origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

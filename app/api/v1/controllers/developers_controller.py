@@ -13,8 +13,40 @@ from app.services.dev_metrics_service import (
     perform_alert_action,
     get_activity_history_data
 )
+from app.services.performance_score_engine import calculate_team_performance_matrix
 
 router = APIRouter()
+
+@router.get("/matrix")
+def get_team_performance_matrix(
+    proyecto_id: str = Query("PROJ-01", description="ID del proyecto"),
+    sprint_id: str = Query(None, description="ID del sprint opcional"),
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene la Matriz Comparativa de Equipo con el Performance Score (0-100 pts),
+    cuadrantes operativos (Estrella, Metódico, Alto Volumen, Atascado) y explicaciones detalladas (Fase 6).
+    """
+    try:
+        return calculate_team_performance_matrix(db, proyecto_id, sprint_id)
+    except Exception as e:
+        db.rollback()
+        print("Error en get_team_performance_matrix:", e)
+        return {
+            "proyecto_id": proyecto_id,
+            "sprint_id": sprint_id,
+            "team_summary": {
+                "total_desarrolladores": 0,
+                "promedio_score_equipo": 0.0,
+                "team_avg_tickets": 0.0,
+                "team_avg_sp": 0.0,
+                "team_avg_cycle_time": 0.0,
+                "top_performer": None,
+                "conteo_cuadrantes": { "ESTRELLA": 0, "METODICO": 0, "ALTO_VOLUMEN": 0, "ATASCADO": 0 }
+            },
+            "developers": []
+        }
+
 
 @router.get("/me/scorecard")
 def get_my_scorecard(
@@ -119,13 +151,6 @@ def list_developers(
                 })
     except Exception as e:
         print("Aviso: Fallback en list_developers debido a la estructura de la base de datos:", e)
-
-    if not devs:
-        devs = [
-            {"assignee_id": "DEV-101", "nombre": "Andrés Felipe Torres", "email": "aftorres@mchav.com"},
-            {"assignee_id": "DEV-102", "nombre": "Clara Gomez", "email": "cgomez@mchav.com"},
-            {"assignee_id": "DEV-103", "nombre": "Michael Salamanca", "email": "msalamanca@mchav.com"}
-        ]
 
     return devs
 

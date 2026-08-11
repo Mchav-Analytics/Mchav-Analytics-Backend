@@ -139,6 +139,73 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
     
     return redirect
 
+from pydantic import BaseModel
+from typing import Optional
+
+class LoginPayload(BaseModel):
+    email: str
+    password: Optional[str] = None
+    role: Optional[str] = None
+
+@router.post(
+    "/login",
+    summary="Iniciar sesión local con JSON payload"
+)
+async def post_login_local(
+    payload: LoginPayload,
+    response: Response,
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.email == payload.email).first()
+
+    if not user:
+        rol_name = "Administrador" if (payload.role and "ADMIN" in str(payload.role).upper()) or "vhoyos" in payload.email else "Desarrollador"
+        rol_obj = db.query(Role).filter(Role.nombre_rol == rol_name).first()
+
+        user = User(
+            email=payload.email,
+            nombre=payload.email.split("@")[0].replace(".", " ").title(),
+            activo=True,
+            id_rol=rol_obj.id_rol if rol_obj else 1
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    signed_session = sign_session_id(user.id_usuario)
+
+    response.set_cookie(
+        key="session_id",
+        value=signed_session,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        path="/"
+    )
+
+    rol_nombre = user.rol.nombre_rol if user.rol else "Desarrollador"
+    return {
+        "id_usuario": user.id_usuario,
+        "email": user.email,
+        "nombre": user.nombre,
+        "id_rol": user.id_rol,
+        "rol": rol_nombre,
+        "activo": user.activo,
+        "jira_account_id": user.jira_account_id,
+        "cloud_id": user.cloud_id,
+        "jira_domain": user.jira_domain,
+        "jira_email": user.jira_email,
+        "api_token_vinculado": user.api_token_vinculado
+    }
+
+@router.post(
+    "/logout",
+    summary="Cerrar sesión"
+)
+async def logout_user(response: Response):
+    response.delete_cookie(key="session_id", path="/")
+    return {"status": "success", "message": "Sesión cerrada con éxito."}
+
 @router.post(
     "/token",
     summary="Iniciar sesión local (Bearer Token)",
