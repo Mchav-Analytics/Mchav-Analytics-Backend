@@ -59,10 +59,10 @@ def calculate_sprint_health(
 
     # Bottleneck breakdown by issue type / stage
     bottleneck_stages = {
-        "In Progress (Desarrollo Activo)": 0.0,
-        "In Review (Revisión de Código)": 0.0,
-        "QA / Testing (Esperando Pruebas)": 0.0,
-        "To Do (En Cola de Espera)": 0.0
+        "Desarrollo Activo": 0.0,
+        "Revisión de Código": 0.0,
+        "Pruebas de Calidad (QA)": 0.0,
+        "En Cola de Espera": 0.0
     }
 
     # Fecha de inicio del sprint para detectar scope creep
@@ -92,23 +92,23 @@ def calculate_sprint_health(
             if ct > 0:
                 active_dev_days += ct * 0.75
                 waiting_queue_days += ct * 0.25
-                bottleneck_stages["In Progress (Desarrollo Activo)"] += ct * 0.75
-                bottleneck_stages["QA / Testing (Esperando Pruebas)"] += ct * 0.25
+                bottleneck_stages["Desarrollo Activo"] += ct * 0.75
+                bottleneck_stages["Pruebas de Calidad (QA)"] += ct * 0.25
         elif st in ("in progress", "en progreso", "desarrollo", "in development", "doing"):
             if ct > 0:
                 active_dev_days += ct * 0.8
                 waiting_queue_days += ct * 0.2
-                bottleneck_stages["In Progress (Desarrollo Activo)"] += ct * 0.8
-                bottleneck_stages["In Review (Revisión de Código)"] += ct * 0.2
+                bottleneck_stages["Desarrollo Activo"] += ct * 0.8
+                bottleneck_stages["Revisión de Código"] += ct * 0.2
         elif st in ("in review", "en revisión", "review"):
             if ct > 0:
                 active_dev_days += ct * 0.3
                 waiting_queue_days += ct * 0.7
-                bottleneck_stages["In Review (Revisión de Código)"] += ct * 0.7
+                bottleneck_stages["Revisión de Código"] += ct * 0.7
         else:  # To Do / Backlog — carryover candidate
             sp_carryover += sp
             waiting_queue_days += 1.0
-            bottleneck_stages["To Do (En Cola de Espera)"] += 1.0
+            bottleneck_stages["En Cola de Espera"] += 1.0
 
     # 2. Cálculo de Porcentajes de Predictibilidad
     total_sp_final = max(sp_planned + sp_added_mid_sprint, 1.0)

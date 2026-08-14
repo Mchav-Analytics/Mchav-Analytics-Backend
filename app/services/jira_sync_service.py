@@ -326,7 +326,12 @@ def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
     total_issues = 0
 
     try:
-        user = user_repo.get(db, user_id)
+        if isinstance(user_id, models.User):
+            user = user_id
+            user_id = user.id_usuario
+        else:
+            user = user_repo.get(db, user_id)
+
         if not user:
             print(f"[Sync Error] Usuario {user_id} no encontrado en base de datos.")
             return
