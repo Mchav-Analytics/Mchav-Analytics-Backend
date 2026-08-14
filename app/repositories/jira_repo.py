@@ -178,16 +178,28 @@ class CRUDIssue(CRUDBase[Issue]):
         lead_time_clipped = case((lead_time_expr > 0.0, lead_time_expr), else_=0.0).label("lead_time")
         cycle_time_clipped = case((cycle_time_expr > 0.0, cycle_time_expr), else_=0.0).label("cycle_time")
         
-        # Devolvemos el tipo y los tiempos de cada ticket
-        return db.query(
+        # Intentar filtro estricto de resueltos en los últimos N días
+        base_query = db.query(
             Issue.issue_type,
             lead_time_clipped,
             cycle_time_clipped
-        ).filter(
-            Issue.id_proyecto == project_id,
+        ).filter(Issue.id_proyecto == project_id)
+        
+        recent = base_query.filter(
             Issue.resolved_at.isnot(None),
             Issue.resolved_at >= date_limit
         ).all()
+        
+        if len(recent) >= 3:
+            return recent
+
+        # Fallback 1: Todos los resueltos del proyecto
+        all_resolved = base_query.filter(Issue.resolved_at.isnot(None)).all()
+        if len(all_resolved) >= 3:
+            return all_resolved
+
+        # Fallback 2: Devolver todos los tickets registrados en la BD para el proyecto
+        return base_query.all()
 
 class CRUDTransicion(CRUDBase[TransicionEstadoIssue]):
     """Repositorio para la gestión del historial de transiciones de estado."""
