@@ -116,22 +116,15 @@ class JiraDatasource:
             "expand": "changelog",
             "fields": fields_str
         }
-        
-        # 1. Intentar con /search/jql (GET)
-        res = await client.get(f"{base_url}/search/jql", headers=headers, params=params)
-        if res.status_code == 200:
-            return res.json()
-        if res.status_code in (429, 502, 503, 504):
-            raise JiraTransientError(f"Rate-limiting o falla de Jira Cloud (HTTP {res.status_code})")
-
-        # 2. Intentar POST /search/jql
+        # La API v3 de Jira en GET /search/jql ignora el parámetro fields si no está formateado correctamente, devolviendo solo IDs.
+        # Por lo tanto, SIEMPRE utilizamos POST para consultas JQL que requieren campos específicos.
         payload = {
             "jql": jql,
-            "startAt": start_at,
             "maxResults": max_results,
-            "expand": ["changelog"],
-            "fields": fields_str.split(",")
+            "expand": "changelog",
+            "fields": [f.strip() for f in fields_str.split(",")]
         }
+        print("PAYLOAD ENVIADO A JIRA:", payload)
         res_post = await client.post(f"{base_url}/search/jql", headers=headers, json=payload)
         if res_post.status_code == 200:
             return res_post.json()
@@ -143,7 +136,7 @@ class JiraDatasource:
         if res_legacy.status_code == 200:
             return res_legacy.json()
 
-        raise Exception(f"Error al buscar issues con JQL '{jql}': {res.text} | {res_post.text}")
+        raise Exception(f"Error al buscar issues con JQL '{jql}': Falló POST ({res_post.text}) y GET Legacy ({res_legacy.text if 'res_legacy' in locals() else 'N/A'})")
 
     @staticmethod
     @jira_retry_decorator
