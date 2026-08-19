@@ -84,7 +84,7 @@ def _build_rich_project_context(db: Session, project_id: str, user_name: str) ->
         if st == "DONE":
             dev_map[assignee]["completed_sp"] += sp
             dev_map[assignee]["completed_count"] += 1
-            ct = get_issue_cycle_time_days(db, issue.id_jira)
+            ct = get_issue_cycle_time_days(issue)
             if ct and ct > 0:
                 dev_map[assignee]["cycle_times"].append(ct)
         elif st == "IN_PROGRESS":

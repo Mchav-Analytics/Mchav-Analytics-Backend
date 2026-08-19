@@ -187,7 +187,7 @@ def calculate_sprint_health(
         ],
         "bottleneck_insight": bottleneck_insight,
         "scope_creep_warning": scope_creep_warning,
-        "gemini_insights": _build_gemini_insights(proyecto_id, health_score, commitment_reliability_pct, scope_creep_sp, flow_efficiency_pct, bottleneck_insight)
+        "gemini_insights": _build_gemini_insights(proyecto_id, health_score, commitment_reliability_pct, sp_added_mid_sprint, flow_efficiency_pct, bottleneck_insight)
     }
 
 
