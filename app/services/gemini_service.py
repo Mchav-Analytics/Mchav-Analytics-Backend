@@ -192,3 +192,55 @@ Usa un tono formal, analítico y corporativo de nivel C-Level.
         f"El proyecto '{proyecto_nombre}' muestra una entrega sostenida con un tiempo de ciclo promedio de {avg_cycle_time} días "
         f"y una velocidad de {velocity} Story Points. Se recomienda mantener el enfoque en la reducción del WIP."
     )
+
+
+def chat_with_gemini(user_message: str, context_info: dict = None, conversation_history: list = None) -> str:
+    """
+    Mantiene una conversación fluida e inteligente con el usuario basada en datos reales de MCHAV y Jira.
+    """
+    if not is_gemini_configured():
+        return (
+            "🤖 *Modo Conversativo Local*: No he detectado una `GEMINI_API_KEY` activa en el archivo `.env`. "
+            "Para chatear en tiempo real con la IA de Google Gemini (gemini-2.5-flash), configura tu API Key en el `.env` del backend."
+        )
+
+    context_info = context_info or {}
+    proj_id = context_info.get("id_proyecto", "PROJ-01")
+    user_name = context_info.get("user_name", "Usuario")
+    health = context_info.get("health_score", 85)
+    cycle_time = context_info.get("cycle_time", 2.5)
+    wip = context_info.get("wip", 3)
+
+    history_str = ""
+    if conversation_history:
+        for msg in conversation_history[-4:]: # Últimos 4 mensajes
+            role = "Usuario" if msg.get("sender") == "user" else "AI Coach"
+            history_str += f"{role}: {msg.get('text', '')}\n"
+
+    prompt = f"""
+Eres el 'AI Dev Coach & Asistente Inteligente de MCHAV Analytics', una IA empática, amigable, sabia y experta en agilidad de software, Scrum, métricas de Jira (Cycle Time, Throughput, WIP, Lead Time) y rendimiento de equipos.
+
+Contexto actual del proyecto y usuario ({user_name}):
+- Proyecto activo: {proj_id}
+- Salud del Sprint: {health}/100 pts.
+- Tiempo de ciclo promedio: {cycle_time} días.
+- Tareas en progreso (WIP): {wip}.
+
+Historial reciente de la conversación:
+{history_str}
+
+Pregunta o mensaje actual del usuario ({user_name}):
+"{user_message}"
+
+Instrucciones de respuesta:
+1. Responde de forma amigable, directa, profesional y conversacional en español.
+2. Utiliza viñetas breves o emojis oportunos (🦉, ⚡, 📊, 💡) para hacer la lectura ágil.
+3. Si la pregunta concierne a métricas o consejos de desarrollo, fundamenta tu respuesta en principios de flujo continuo y reducción de WIP.
+4. Mantén la respuesta concisa y clara (máximo 2 a 3 párrafos cortos).
+"""
+
+    reply = _call_gemini_rest_api(prompt, temperature=0.6, max_tokens=450)
+    if reply:
+        return reply
+
+    return "Disculpa, en este momento no pude consultar el motor de Gemini. Por favor verifica la conexión a Internet o inténtalo nuevamente en unos segundos."

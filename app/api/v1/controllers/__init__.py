@@ -7,5 +7,6 @@ from app.api.v1.controllers.users_controller import router as users_router
 from app.api.v1.controllers.reports_controller import router as reports_router
 from app.api.v1.controllers.developers_controller import router as developers_router
 from app.api.v1.controllers.alerts_controller import router as alerts_router
+from app.api.v1.controllers.ai_controller import router as ai_router
 
-__all__ = ["auth_router", "jira_router", "projects_router", "jql_router", "users_router", "reports_router", "developers_router", "alerts_router"]
+__all__ = ["auth_router", "jira_router", "projects_router", "jql_router", "users_router", "reports_router", "developers_router", "alerts_router", "ai_router"]
