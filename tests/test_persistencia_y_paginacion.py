@@ -13,7 +13,18 @@ from app.api.v1.controllers.projects_controller import get_projects, get_project
 from app.api.v1.controllers.jira_controller import get_sync_logs
 from app.main import app
 
+from app.core.security import get_current_user
+from app.models.auth import User, Role
+
 client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    mock_role = Role(nombre_rol="Administrador", scopes="jira:read,jira:sync,projects:write,admin")
+    mock_user = User(id_usuario=55, email="test@mchav.com", activo=True, rol=mock_role)
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 @pytest.fixture(name="db_session")
 def fixture_db_session():

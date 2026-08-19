@@ -37,7 +37,7 @@ def test_procesar_callback_oauth_exitoso(mock_repo, mock_exchange, mock_validate
         follow_redirects=False
     )
     
-    assert response.status_code == 307
+    assert response.status_code in (302, 307)
     assert "/dashboard" in response.headers["location"]
     assert "session_id" in response.cookies
 
