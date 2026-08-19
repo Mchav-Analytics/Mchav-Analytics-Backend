@@ -72,7 +72,7 @@ def _call_gemini_rest_api(prompt: str, temperature: float = 0.4, max_tokens: int
 
 def generate_dev_coach_tip(scorecard: dict, urgent_qa: list, active_dev: list, fallback_tip: str) -> str:
     """
-    Genera un consejo inteligente y empático del AI Dev Coach (Mascota Búho) impulsado por Gemini.
+    Genera un consejo inteligente y empático de NubI IA (Mascota Búho) impulsado por Gemini.
     Usa caché por desarrollador de 5 minutos. Si falla o no hay API Key, retorna fallback_tip.
     """
     dev_email = scorecard.get("email") or scorecard.get("assignee_name") or "dev_default"
@@ -93,7 +93,7 @@ def generate_dev_coach_tip(scorecard: dict, urgent_qa: list, active_dev: list, f
     qa_bugs_str = ", ".join([b.get("key_issue", "") for b in urgent_qa[:3]]) if urgent_qa else "Ninguno"
 
     prompt = f"""
-Eres 'AI Dev Coach', un búho sabio, entusiasta y experto en metodologías ágiles y analítica de software.
+Eres 'NubI IA', la Inteligencia Artificial y Asistente Analítico de MCHAV Analytics (representado por una mascota búho sabia y experta en agilidad).
 Tu misión es darle un consejo conciso, empático y constructivo a un desarrollador sobre su rendimiento actual.
 
 Datos reales del desarrollador:
@@ -226,11 +226,11 @@ def chat_with_gemini(user_message: str, context_info: dict = None, conversation_
     history_str = ""
     if conversation_history:
         for msg in conversation_history[-6:]: # Últimos 6 mensajes
-            role = "Usuario" if msg.get("sender") == "user" else "AI Dev Coach"
+            role = "Usuario" if msg.get("sender") == "user" else "NubI IA"
             history_str += f"{role}: {msg.get('text', '')}\n"
 
     prompt = f"""
-Eres el 'AI Dev Coach & Senior Agile Data Scientist' de MCHAV Analytics. Eres un experto analista de datos de software, ingeniería de procesos ágiles y rendimiento técnico de equipos de desarrollo.
+Eres 'NubI IA', la Inteligencia Artificial Generativa y Senior Agile Data Scientist de MCHAV Analytics. Eres un experto analista de datos de software, ingeniería de procesos ágiles y rendimiento técnico de equipos de desarrollo.
 
 TU OBJETIVO: Proveer diagnósticos profundos, altamente analíticos, estructurados y precisos basados en los DATOS REALES EXTRAÍDOS DE LA BASE DE DATOS Y JIRA.
 
