@@ -201,51 +201,78 @@ Usa un tono formal, analítico y corporativo de nivel C-Level.
 
 def chat_with_gemini(user_message: str, context_info: dict = None, conversation_history: list = None) -> str:
     """
-    Mantiene una conversación fluida e inteligente con el usuario basada en datos reales de MCHAV y Jira.
+    Mantiene una conversación analítica, fluida e inteligente con el usuario basada en datos reales de MCHAV y Jira.
+    Soporta desglose por desarrollador individual, cuellos de botella, salud de sprint y alertas.
     """
     if not is_gemini_configured():
         return (
-            "🤖 *Modo Conversativo Local*: No he detectado una `GEMINI_API_KEY` activa en el archivo `.env`. "
-            "Para chatear en tiempo real con la IA de Google Gemini (gemini-2.5-flash), configura tu API Key en el `.env` del backend."
+            "🤖 *Modo Conversacional Local*: No he detectado una `GEMINI_API_KEY` activa en el archivo `.env`. "
+            "Para chatear en tiempo real con la IA de Google Gemini, configura tu API Key en el `.env` del backend."
         )
 
     context_info = context_info or {}
-    proj_id = context_info.get("id_proyecto", "PROJ-01")
     user_name = context_info.get("user_name", "Usuario")
-    health = context_info.get("health_score", 85)
-    cycle_time = context_info.get("cycle_time", 2.5)
-    wip = context_info.get("wip", 3)
+    proj_id = context_info.get("id_proyecto", "PROJ-01")
+    
+    # Formatear la lista de desarrolladores individualmente
+    devs_data = context_info.get("desempeno_desarrolladores_individual", [])
+    devs_str = json.dumps(devs_data, indent=2, ensure_ascii=False) if devs_data else "No hay métricas de desarrolladores registradas aún."
+    
+    # Formatear salud de sprint y cuellos de botella
+    salud_str = json.dumps(context_info.get("salud_sprint", {}), indent=2, ensure_ascii=False)
+    blocked_str = json.dumps(context_info.get("tickets_bloqueados_o_criticos", []), indent=2, ensure_ascii=False)
+    alerts_str = json.dumps(context_info.get("alertas_recientes", []), indent=2, ensure_ascii=False)
 
     history_str = ""
     if conversation_history:
-        for msg in conversation_history[-4:]: # Últimos 4 mensajes
-            role = "Usuario" if msg.get("sender") == "user" else "AI Coach"
+        for msg in conversation_history[-6:]: # Últimos 6 mensajes
+            role = "Usuario" if msg.get("sender") == "user" else "AI Dev Coach"
             history_str += f"{role}: {msg.get('text', '')}\n"
 
     prompt = f"""
-Eres el 'AI Dev Coach & Asistente Inteligente de MCHAV Analytics', una IA empática, amigable, sabia y experta en agilidad de software, Scrum, métricas de Jira (Cycle Time, Throughput, WIP, Lead Time) y rendimiento de equipos.
+Eres el 'AI Dev Coach & Senior Agile Data Scientist' de MCHAV Analytics. Eres un experto analista de datos de software, ingeniería de procesos ágiles y rendimiento técnico de equipos de desarrollo.
 
-Contexto actual del proyecto y usuario ({user_name}):
-- Proyecto activo: {proj_id}
-- Salud del Sprint: {health}/100 pts.
-- Tiempo de ciclo promedio: {cycle_time} días.
-- Tareas en progreso (WIP): {wip}.
+TU OBJETIVO: Proveer diagnósticos profundos, altamente analíticos, estructurados y precisos basados en los DATOS REALES EXTRAÍDOS DE LA BASE DE DATOS Y JIRA.
 
-Historial reciente de la conversación:
+=== DATOS ANALÍTICOS REALES EXTRAÍDOS DE LA BASE DE DATOS Y JIRA ===
+
+1. DESEMPEÑO INDIVIDUAL POR DESARROLLADOR:
+{devs_str}
+
+2. SALUD DEL SPRINT Y FLUJO OPERATIVO:
+{salud_str}
+
+3. INCIDENCIAS CRÍTICAS Y ESTANCADAS:
+{blocked_str}
+
+4. ALERTAS OPERATIVAS RECIENTES DEL SISTEMA:
+{alerts_str}
+
+=== FIN DE DATOS DE LA BASE DE DATOS ===
+
+HISTORIAL RECIENTE DE CONVERSACIÓN:
 {history_str}
 
-Pregunta o mensaje actual del usuario ({user_name}):
+PREGUNTA DEL USUARIO ({user_name}):
 "{user_message}"
 
-Instrucciones de respuesta:
-1. Responde de forma amigable, directa, profesional y conversacional en español.
-2. Utiliza viñetas breves o emojis oportunos (🦉, ⚡, 📊, 💡) para hacer la lectura ágil.
-3. Si la pregunta concierne a métricas o consejos de desarrollo, fundamenta tu respuesta en principios de flujo continuo y reducción de WIP.
-4. Mantén la respuesta concisa y clara (máximo 2 a 3 párrafos cortos).
+INSTRUCCIONES DE RESPUESTA Y ANÁLISIS:
+1. SI EL USUARIO PREGUNTA SOBRE DESEMPEÑO DE DESARROLLADORES, RENDIMIENTO INDIVIDUAL O INTEGRANTES DEL EQUIPO:
+   - Menciona a CADA desarrollador por su NOMBRE real registrado en los datos.
+   - Detalla sus Story Points entregados, su Cycle Time promedio en días, su nivel de WIP (tareas en progreso) y los bugs asignados.
+   - Ofrece una evaluación crítica constructiva individual para cada uno (ej. quién tiene el ritmo de entrega más ágil, quién tiene sobrecarga de WIP o bloqueos).
+2. SI EL USUARIO PREGUNTA SOBRE SALUD DEL SPRINT, KPIS O CUELLOS DE BOTELLA:
+   - Cita el puntaje exacto de salud (Health Score), el % de cumplimiento de compromisos y la desviación por alcance (Scope Creep).
+   - Identifica las fases bloqueantes y menciona las claves de los tickets específicos (ej. MCHAV-101, MCHAV-105).
+3. ESTRUCTURA Y FORMATO DE LA RESPUESTA:
+   - Usa un formato Markdown pulido con encabezados, listas con viñetas, negritas para números clave y tablas si facilitan la comparación.
+   - Incluye emojis sutiles (🦉, 📊, ⚡, 🎯, 💡, ⚠️).
+   - Provee SIEMPRE recomendaciones de acción concretas al final para optimizar el flujo.
+   - Sé exhaustivo, analítico y profesional. No des respuestas genéricas de 2 líneas.
 """
 
-    reply = _call_gemini_rest_api(prompt, temperature=0.6, max_tokens=450)
+    reply = _call_gemini_rest_api(prompt, temperature=0.4, max_tokens=1200)
     if reply:
         return reply
 
-    return "Disculpa, en este momento no pude consultar el motor de Gemini. Por favor verifica la conexión a Internet o inténtalo nuevamente en unos segundos."
+    return "Disculpa, en este momento no pude obtener respuesta del motor analítico de Gemini. Por favor verifica tu conexión o intenta nuevamente."
