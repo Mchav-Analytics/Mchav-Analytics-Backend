@@ -24,15 +24,15 @@ def is_gemini_configured() -> bool:
 
 def _call_gemini_rest_api(prompt: str, temperature: float = 0.4, max_tokens: int = 350) -> Optional[str]:
     """
-    Realiza una petición HTTP directa a la API REST de Google Gemini (gemini-2.5-flash).
-    Utiliza httpx y maneja timeouts y errores gracefully.
+    Realiza una petición HTTP directa a la API REST de Google Gemini.
+    Prueba el modelo configurado (gemini-3.6-flash) y conmuta automáticamente si Google exige otro modelo.
     """
     if not is_gemini_configured():
         return None
 
-    model = GEMINI_MODEL_NAME or "gemini-2.5-flash"
-    url = f"{GEMINI_API_ENDPOINT}/{model}:generateContent?key={GEMINI_API_KEY}"
-    
+    primary_model = GEMINI_MODEL_NAME or "gemini-flash-lite-latest"
+    candidate_models = [primary_model, "gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.5-flash-lite"]
+
     payload = {
         "contents": [
             {
@@ -47,20 +47,25 @@ def _call_gemini_rest_api(prompt: str, temperature: float = 0.4, max_tokens: int
         }
     }
 
-    try:
-        with httpx.Client(timeout=10.0) as client:
-            response = client.post(url, json=payload)
-            if response.status_code == 200:
-                res_data = response.json()
-                candidates = res_data.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts and "text" in parts[0]:
-                        return parts[0]["text"].strip()
-            else:
-                print(f"Aviso Gemini API (HTTP {response.status_code}): {response.text[:200]}")
-    except Exception as e:
-        print(f"Error conectando con Google Gemini API: {e}")
+    with httpx.Client(timeout=25.0) as client:
+        for model in candidate_models:
+            url = f"{GEMINI_API_ENDPOINT}/{model}:generateContent?key={GEMINI_API_KEY}"
+            try:
+                response = client.post(url, json=payload)
+                if response.status_code == 200:
+                    res_data = response.json()
+                    candidates = res_data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts and "text" in parts[0]:
+                            return parts[0]["text"].strip()
+                elif response.status_code == 404:
+                    print(f"Modelo Gemini '{model}' no disponible (404), intentando siguiente modelo candidato...")
+                    continue
+                else:
+                    print(f"Aviso Gemini API ({model} HTTP {response.status_code}): {response.text[:200]}")
+            except Exception as e:
+                print(f"Error conectando con Google Gemini API ({model}): {e}")
 
     return None
 

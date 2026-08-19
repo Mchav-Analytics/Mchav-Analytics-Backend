@@ -47,7 +47,7 @@ JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()
 
 # Modelo predeterminado de alta velocidad y eficiencia
-GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash").strip()
+GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-flash-lite-latest").strip()
 
 # -----------------------------------------------------------------------------
 # SESIÓN Y COOKIES DE AUTENTICACIÓN DE USUARIO
