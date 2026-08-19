@@ -68,6 +68,45 @@ async def get_projects(
             projects = project_repo.get_multi(db, skip=offset, limit=limit, sort=sort, order=order)
     return projects
 
+@router.post("", response_model=ProjectResponse)
+@router.post("/", response_model=ProjectResponse)
+async def create_project(
+    request: Request,
+    payload: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    POST /api/v1/projects
+    Crea o guarda un nuevo proyecto directamente en la base de datos MySQL/SQLite.
+    """
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
+    
+    key = payload.get("key") or payload.get("key_proyecto") or f"PROJ-{int(datetime.now().timestamp())}"
+    key = key.upper().strip()
+    nombre = payload.get("name") or payload.get("nombre") or f"Proyecto {key}"
+    id_proj = payload.get("id") or payload.get("id_proyecto") or key
+    
+    existing = project_repo.get_by_key(db, key) or db.query(models.Proyecto).filter(models.Proyecto.id_proyecto == id_proj).first()
+    if existing:
+        existing.nombre = nombre
+        existing.estado = payload.get("status", "Active")
+        db.commit()
+        db.refresh(existing)
+        return existing
+        
+    new_proj = models.Proyecto(
+        id_proyecto=id_proj,
+        key_proyecto=key,
+        nombre=nombre,
+        estado=payload.get("status", "Active"),
+        id_board=payload.get("id_board", 1)
+    )
+    db.add(new_proj)
+    db.commit()
+    db.refresh(new_proj)
+    return new_proj
+
 @router.get("/{proyecto_id}/kpis")
 async def get_project_kpis(
     request: Request,
@@ -126,6 +165,8 @@ async def get_project_kpis_issues_detail(
     metric_type: Optional[str] = None,
     fecha_inicio: Optional[str] = None,
     fecha_fin: Optional[str] = None,
+    assignee_email: Optional[str] = None,
+    assignee_name: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
     db: Session = Depends(get_db)
@@ -142,6 +183,17 @@ async def get_project_kpis_issues_detail(
 
     if sprint_id:
         query = query.filter(models.Issue.id_sprint == sprint_id)
+        
+    if assignee_email or assignee_name:
+        conditions = []
+        if assignee_email:
+            conditions.append(models.Issue.assignee_email == assignee_email)
+        if assignee_name:
+            conditions.append(models.Issue.assignee_name.ilike(f"%{assignee_name}%"))
+        
+        if conditions:
+            from sqlalchemy import or_
+            query = query.filter(or_(*conditions))
 
     # Filtrar según el tipo de métrica deseado
     if metric_type in ("lead_time", "cycle_time", "throughput"):
