@@ -325,7 +325,7 @@ def _calc_time_ago(issue_dict: dict) -> str:
 
 
 def _generate_ai_coach_tip(scorecard: dict, urgent_qa: list, active_dev: list) -> str:
-    """Genera un consejo inteligente dinámico basado en datos reales."""
+    """Genera un consejo inteligente dinámico impulsado por Google Gemini (con fallback al motor de reglas)."""
     tips = []
     ct = scorecard.get("cycle_time_personal", 0)
     ct_prev = scorecard.get("cycle_time_prev", 0)
@@ -353,7 +353,14 @@ def _generate_ai_coach_tip(scorecard: dict, urgent_qa: list, active_dev: list) -
         else:
             tips.append("Aún no hay entregas registradas en este sprint. Enfócate en mover tus tareas de 'To Do' a 'In Progress'.")
 
-    return " ".join(tips)
+    fallback_text = " ".join(tips)
+
+    try:
+        from app.services.gemini_service import generate_dev_coach_tip
+        return generate_dev_coach_tip(scorecard, urgent_qa, active_dev, fallback_text)
+    except Exception as e:
+        print("Error en integración Gemini Dev Coach:", e)
+        return fallback_text
 
 
 def get_developer_alerts_data(db: Session, proyecto_id: str, email_or_assignee_id: str = None):

@@ -41,6 +41,15 @@ JIRA_EMAIL = os.getenv("JIRA_EMAIL", "").strip()
 JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "").strip()
 
 # -----------------------------------------------------------------------------
+# CREDENCIALES E INTEGRACIÓN DE GOOGLE GEMINI API (IA GENERATIVA)
+# -----------------------------------------------------------------------------
+# API Key del proyecto de Google Gemini (Plan Pro o Developer Console)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()
+
+# Modelo predeterminado de alta velocidad y eficiencia
+GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash").strip()
+
+# -----------------------------------------------------------------------------
 # SESIÓN Y COOKIES DE AUTENTICACIÓN DE USUARIO
 # -----------------------------------------------------------------------------
 # Nombre de la cookie HTTP-Only donde se almacena el ID de usuario firmado (HMAC).

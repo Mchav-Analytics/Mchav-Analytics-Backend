@@ -186,8 +186,32 @@ def calculate_sprint_health(
             for stage, days in bottleneck_stages.items()
         ],
         "bottleneck_insight": bottleneck_insight,
-        "scope_creep_warning": scope_creep_warning
+        "scope_creep_warning": scope_creep_warning,
+        "gemini_insights": _build_gemini_insights(proyecto_id, health_score, commitment_reliability_pct, scope_creep_sp, flow_efficiency_pct, bottleneck_insight)
     }
+
+
+def _build_gemini_insights(proyecto_id: str, health_score: int, commitment: float, scope_creep: float, flow_eff: float, bottleneck_text: str) -> dict:
+    """Genera diagnósticos analíticos ejecutivos para el Líder Técnico impulsados por Gemini."""
+    fallback_insights = {
+        "diagnostico_ejecutivo": f"El proyecto '{proyecto_id}' registra una salud general de {health_score}/100 pts con un cumplimiento de compromiso del {commitment}%.",
+        "principal_riesgo": bottleneck_text or f"Desviación por alcance agregado de +{scope_creep} Story Points en el sprint actual.",
+        "recomendacion_lider": "Revisar la distribución de carga y priorizar la resolución de cuellos de botella antes de añadir nuevos tickets."
+    }
+
+    try:
+        from app.services.gemini_service import generate_lider_dashboard_insights
+        sprint_health_summary = {
+            "id_proyecto": proyecto_id,
+            "health_score": health_score,
+            "commitment_reliability_pct": commitment,
+            "scope_creep_sp": scope_creep,
+            "flow_efficiency_pct": flow_eff
+        }
+        return generate_lider_dashboard_insights(sprint_health_summary, [], fallback_insights)
+    except Exception as e:
+        print("Error al generar insights de Gemini para Líder Técnico:", e)
+        return fallback_insights
 
 
 def _empty_health_response(proyecto_id: str, sprint_id: str = None) -> Dict[str, Any]:

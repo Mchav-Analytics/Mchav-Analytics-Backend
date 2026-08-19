@@ -29,4 +29,7 @@ matplotlib==3.11.1
 apscheduler==3.11.3
 tenacity==8.2.3
 
+# Integración de IA con Google Gemini API
+google-genai>=0.1.0
+
 
