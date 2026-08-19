@@ -166,12 +166,14 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
     u_data = await auth_service.exchange_code_for_user_profile(code)
     
     user = user_repo.get_by_jira_account_id(db, u_data["jira_account_id"])
+    rol_default = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
     if not user:
-        rol_default = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
         if rol_default:
             u_data["id_rol"] = rol_default.id_rol
         user = user_repo.create(db, obj_in=u_data)
     else:
+        if not user.id_rol and rol_default:
+            u_data["id_rol"] = rol_default.id_rol
         user = user_repo.update(db, db_obj=user, obj_in=u_data)
 
     signed_session = sign_session_id(user.id_usuario)
