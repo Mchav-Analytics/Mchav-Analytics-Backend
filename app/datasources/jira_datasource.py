@@ -185,3 +185,37 @@ class JiraDatasource:
         if res.status_code != 200:
             return {"values": []}
         return res.json()
+
+    @staticmethod
+    @jira_retry_decorator
+    async def fetch_issue_transitions(
+        client: httpx.AsyncClient, 
+        base_url: str, 
+        headers: Dict[str, str], 
+        issue_id: str
+    ) -> Any:
+        """Obtiene las transiciones permitidas (posibles cambios de estado) para un ticket específico."""
+        res = await client.get(f"{base_url}/issue/{issue_id}/transitions", headers=headers)
+        if res.status_code in (429, 502, 503, 504):
+            raise JiraTransientError(f"Error efímero de Jira transitions ({res.status_code})")
+        if res.status_code != 200:
+            return {"transitions": []}
+        return res.json()
+
+    @staticmethod
+    @jira_retry_decorator
+    async def post_issue_transition(
+        client: httpx.AsyncClient, 
+        base_url: str, 
+        headers: Dict[str, str], 
+        issue_id: str,
+        transition_id: str
+    ) -> bool:
+        """Envía una petición POST a Jira Cloud para realizar la transición de estado de un ticket."""
+        payload = {"transition": {"id": transition_id}}
+        res = await client.post(f"{base_url}/issue/{issue_id}/transitions", headers=headers, json=payload)
+        if res.status_code in (429, 502, 503, 504):
+            raise JiraTransientError(f"Error efímero al aplicar transición en Jira ({res.status_code})")
+        if res.status_code not in (200, 204):
+            raise Exception(f"Error al cambiar estado en Jira ({res.status_code}): {res.text}")
+        return True
