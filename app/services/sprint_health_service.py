@@ -215,3 +215,125 @@ def _empty_health_response(proyecto_id: str, sprint_id: str = None) -> Dict[str,
         "bottleneck_insight": None,
         "scope_creep_warning": None
     }
+
+
+def calculate_burndown_chart_data(
+    db: Session,
+    proyecto_id: str,
+    sprint_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Genera la data del Burndown Chart para el sprint mas reciente o el especificado.
+    """
+    from datetime import timedelta
+    
+    # 1. Fetch Sprint
+    sprint = None
+    if sprint_id:
+        sprint = db.query(models.Sprint).filter_by(id_sprint=sprint_id, id_proyecto=proyecto_id).first()
+    
+    if not sprint:
+        sprint = db.query(models.Sprint).filter_by(id_proyecto=proyecto_id).order_by(models.Sprint.fecha_fin.desc()).first()
+    
+    if not sprint or not sprint.fecha_inicio or not sprint.fecha_fin:
+        return []
+    
+    start_date = sprint.fecha_inicio
+    end_date = sprint.fecha_fin
+    
+    # If datetimes have timezone info, strip it or normalize
+    if start_date.tzinfo: start_date = start_date.replace(tzinfo=None)
+    if end_date.tzinfo: end_date = end_date.replace(tzinfo=None)
+    
+    delta_days = (end_date - start_date).days
+    if delta_days <= 0: delta_days = 1
+
+    # 2. Fetch issues
+    issues = db.query(models.Issue).filter(
+        models.Issue.id_proyecto == proyecto_id,
+        models.Issue.id_sprint == sprint.id_sprint
+    ).all()
+    
+    total_sp = 0.0
+    for i in issues:
+        try:
+            total_sp += float(i.story_points or 0)
+        except:
+            pass
+            
+    # If no SP, fallback to counting issues
+    use_count = total_sp == 0
+    if use_count:
+        total_sp = float(len(issues))
+    
+    # 3. Fetch transitions
+    issue_ids = [i.id_jira for i in issues]
+    transitions = []
+    if issue_ids:
+        transitions = db.query(models.TransicionEstadoIssue).filter(
+            models.TransicionEstadoIssue.id_jira.in_(issue_ids)
+        ).order_by(models.TransicionEstadoIssue.fecha_cambio.asc()).all()
+
+    burndown_data = []
+    
+    # 4. Generate daily data
+    for i in range(delta_days + 1):
+        current_day = start_date + timedelta(days=i)
+        current_eod = current_day.replace(hour=23, minute=59, second=59)
+        
+        ideal = total_sp - (total_sp / delta_days) * i
+        if ideal < 0: ideal = 0
+        
+        remaining_sp = 0.0
+        completed_tasks_count = 0
+        
+        for issue in issues:
+            sp = 1.0 if use_count else 0.0
+            if not use_count:
+                try: sp = float(issue.story_points or 0)
+                except: pass
+                
+            # Filter transitions up to this day
+            issue_transitions = []
+            for t in transitions:
+                if t.id_jira == issue.id_jira:
+                    t_date = t.fecha_cambio
+                    if t_date.tzinfo: t_date = t_date.replace(tzinfo=None)
+                    if t_date <= current_eod:
+                        issue_transitions.append(t)
+            
+            # Default to issue current status if no transitions and we're past its creation?
+            # Actually, standard behavior: assume it's NOT done unless we have a transition saying it is.
+            # However, if it has NO transitions, we look at issue.estado
+            status = "Por hacer"
+            if issue_transitions:
+                status = issue_transitions[-1].estado_nuevo
+            else:
+                # If no historical transitions are tracked, just use the current issue state
+                # but only if the issue was created before this day.
+                # To be safe, if no transitions, just treat it as its current state.
+                status = issue.estado or "Por hacer"
+                
+            is_done = status and status.lower() in ["done", "finalizado", "cerrado", "completado"]
+            
+            if not is_done:
+                remaining_sp += sp
+                
+            if is_done and issue_transitions:
+                # Check if it was moved to done ON this exact day
+                last_t_date = issue_transitions[-1].fecha_cambio
+                if last_t_date.tzinfo: last_t_date = last_t_date.replace(tzinfo=None)
+                if last_t_date.date() == current_day.date():
+                    completed_tasks_count += 1
+                    
+        # Para que el frontend tenga un formato bonito
+        burndown_data.append({
+            "fecha": f"Día {i}",
+            "fecha_real": current_day.strftime("%d/%m"),
+            "esfuerzo_ideal": round(ideal, 2),
+            "esfuerzo_restante": round(remaining_sp, 2),
+            "tareas_completadas": completed_tasks_count
+        })
+
+    return burndown_data
+
