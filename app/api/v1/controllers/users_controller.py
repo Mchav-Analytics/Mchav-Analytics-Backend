@@ -1,3 +1,4 @@
+from datetime import datetime
 # app/api/v1/controllers/users_controller.py
 # Controlador HTTP para la Gestión de Usuarios, Roles (RBAC) y Asignación de Proyectos (HU-003, HU-004, HU-005)
 
@@ -8,6 +9,8 @@ from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.models.audit import AuditLog
+from sqlalchemy import desc
 from app.models.auth import User, Role, UserProject
 from app.models.jira import Proyecto
 
@@ -219,3 +222,38 @@ async def assign_user_projects(
         "id_usuario": id_usuario,
         "proyectos_asignados": updated_proj_ids
     }
+
+
+class AuditLogResponse(BaseModel):
+    id_log: int
+    user_email: Optional[str]
+    action_path: str
+    method: str
+    timestamp: datetime
+    description: str
+    type: str
+
+    class Config:
+        from_attributes = True
+
+@router.get(
+    "/{user_id}/logs",
+    response_model=List[AuditLogResponse],
+    summary="Obtener el historial de auditoría de un usuario",
+    description="Devuelve las acciones registradas por el middleware de auditoría para un usuario específico."
+)
+def get_user_logs(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    _verify_admin(current_user)
+    
+    # Primero buscamos el email del usuario
+    target_user = db.query(User).filter(User.id_usuario == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
+
+    # Buscamos los logs que coincidan con el email de ese usuario
+    logs = db.query(AuditLog).filter((AuditLog.user_email == target_user.email) | (AuditLog.user_email == str(target_user.id_usuario))).order_by(desc(AuditLog.timestamp)).all()
+    return logs

@@ -9,6 +9,8 @@ from app.core.config import FRONTEND_URL
 from app.core.database import engine, SessionLocal
 import app.models as models
 from app.models import LogsSincronizacion
+from app.core.middleware import AuditMiddleware
+from app.models.audit import AuditLog
 from app.api.v1.api import api_router
 from fastapi import APIRouter
 from app.api.v1.controllers import auth_controller
@@ -21,6 +23,8 @@ app = FastAPI(
 # -----------------------------------------------------------------------------
 # EVENTO DE INICIALIZACIÓN DE LA APLICACIÓN (STARTUP EVENT)
 # -----------------------------------------------------------------------------
+app.add_middleware(AuditMiddleware)
+
 @app.on_event("startup")
 def startup_event():
     with engine.connect() as conn:

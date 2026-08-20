@@ -15,7 +15,7 @@ from app.schemas.project_schema import ProjectResponse, ProjectMappingPayload
 from app.api.v1 import deps
 from app.core.security import get_current_user
 
-from app.services.sprint_health_service import calculate_sprint_health
+from app.services.sprint_health_service import calculate_sprint_health, calculate_burndown_chart_data
 
 # Sub-router para la gestión de proyectos
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -438,3 +438,20 @@ async def get_project_percentiles(
             res["cycle_time"]["p90"] = round(ct_avg * 1.8, 1)
             
     return results
+
+@router.get("/{proyecto_id}/burndown")
+@router.get("/{proyecto_id}/sprints/{sprint_id}/burndown")
+async def get_burndown_chart(
+    proyecto_id: str,
+    sprint_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna la data calculada para el Burndown Chart del sprint indicado
+    o el mas reciente.
+    """
+    try:
+        data = calculate_burndown_chart_data(db, proyecto_id, sprint_id)
+        return {"data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
