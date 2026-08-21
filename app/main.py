@@ -96,8 +96,38 @@ def startup_event():
             r_exist = db.query(models.Role).filter(models.Role.nombre_rol == r_info["nombre_rol"]).first()
             if not r_exist:
                 db.add(models.Role(nombre_rol=r_info["nombre_rol"], scopes=r_info["scopes"]))
-            elif not r_exist.scopes:
-                r_exist.scopes = r_info["scopes"]
+        db.commit()
+
+        # Seeding de los 5 usuarios principales del sistema con sus roles respectivos
+        from app.core.security import hash_password
+        default_pwd_hash = hash_password("Mchav2026!")
+
+        users_seed = [
+            {"email": "salamancamai12@gmail.com", "nombre": "Michael Salamanca", "rol": "Administrador"},
+            {"email": "valentina1025m@gmail.com", "nombre": "Valentina Martínez", "rol": "Administrador"},
+            {"email": "corredorbeltran592@gmail.com", "nombre": "Camilo Corredor", "rol": "Planificador"},
+            {"email": "pipealcala22@gmail.com", "nombre": "Felipe Alcalá", "rol": "Desarrollador"},
+            {"email": "stephanyleon326@gmail.com", "nombre": "Stephany León", "rol": "Desarrollador"},
+        ]
+
+        for u_info in users_seed:
+            u_exist = db.query(models.User).filter(models.User.email == u_info["email"]).first()
+            r_target = db.query(models.Role).filter(models.Role.nombre_rol == u_info["rol"]).first()
+            if not u_exist and r_target:
+                new_u = models.User(
+                    email=u_info["email"],
+                    nombre=u_info["nombre"],
+                    id_rol=r_target.id_rol,
+                    password_hash=default_pwd_hash,
+                    activo=True
+                )
+                db.add(new_u)
+            elif u_exist and r_target:
+                u_exist.id_rol = r_target.id_rol
+                u_exist.nombre = u_info["nombre"]
+                if not u_exist.password_hash:
+                    u_exist.password_hash = default_pwd_hash
+                u_exist.activo = True
         db.commit()
 
         stuck_logs = db.query(LogsSincronizacion).filter(LogsSincronizacion.resultado == "RUNNING").all()
