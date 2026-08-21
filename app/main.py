@@ -130,6 +130,15 @@ def startup_event():
                 u_exist.activo = True
         db.commit()
 
+        # Eliminar usuarios obsoletos/legados para que queden ÚNICAMENTE las 5 cuentas oficiales
+        valid_emails = [u["email"] for u in users_seed]
+        db.query(models.User).filter(
+            (models.User.email.notin_(valid_emails)) | 
+            (models.User.nombre == "Usuario") |
+            (models.User.email.in_(["dev@mchav.com", "vhoyos@mchav.com", "cgomez@mchav.com", "aftorres@mchav.com"]))
+        ).delete(synchronize_session=False)
+        db.commit()
+
         stuck_logs = db.query(LogsSincronizacion).filter(LogsSincronizacion.resultado == "RUNNING").all()
         for log in stuck_logs:
             log.resultado = "ERROR"
