@@ -46,7 +46,7 @@ def test_create_and_update_help_request():
     assert new_req["titulo"] == "Prueba de solicitud de ayuda"
 
     # Actualizar a EN_ATENCION
-    updated = update_help_request_status(None, new_req["id_solicitud"], "EN_ATENCION", "Líder Técnico")
+    updated = update_help_request_status(None, new_req["id_solicitud"], "EN_ATENCION", "Planificador")
     assert updated["estado"] == "EN_ATENCION"
 
     # Obtener todas

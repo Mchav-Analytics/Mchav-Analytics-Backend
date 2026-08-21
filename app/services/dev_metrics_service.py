@@ -406,7 +406,7 @@ def get_developer_alerts_data(db: Session, proyecto_id: str, email_or_assignee_i
 def perform_alert_action(db: Session, issue_id: str, action_type: str):
     """Ejecuta una acción de desbloqueo (pedir ayuda, marcar bloqueado, descomponer tarea)."""
     if action_type == "request_help":
-        msg = f"Solicitud de auxilio técnico enviada al Líder Técnico para el ticket #{issue_id}."
+        msg = f"Solicitud de auxilio técnico enviada al Planificador para el ticket #{issue_id}."
     elif action_type == "mark_blocked":
         msg = f"El ticket #{issue_id} ha sido marcado con la etiqueta [BLOCKED] en el sistema."
     elif action_type == "split_task":

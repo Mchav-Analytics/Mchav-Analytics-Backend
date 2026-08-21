@@ -2,7 +2,7 @@
 # Servicio de Inteligencia Artificial Generativa impulsado por Google Gemini API (gemini-2.5-flash)
 # Proporciona diagnósticos analíticos en tiempo real para:
 # 1. AI Dev Coach (Mascota Búho en la vista de Desarrollador)
-# 2. Dashboard del Líder Técnico (Salud del sprint y alertas de cuellos de botella)
+# 2. Dashboard del Planificador (Salud del sprint y alertas de cuellos de botella)
 # 3. Informes Ejecutivos PDF (Conclusiones analíticas consolidadas)
 
 import json
@@ -120,7 +120,7 @@ Reglas de respuesta:
 
 def generate_lider_dashboard_insights(sprint_health: dict, alerts: list, fallback_insights: dict) -> dict:
     """
-    Genera diagnósticos analíticos ejecutivos para el Dashboard del Líder Técnico impulsados por Gemini.
+    Genera diagnósticos analíticos ejecutivos para el Dashboard del Planificador impulsados por Gemini.
     """
     proj_id = sprint_health.get("id_proyecto", "PROJ-01")
     cache_key = f"gemini_lider_insights_{proj_id}"
@@ -138,7 +138,7 @@ def generate_lider_dashboard_insights(sprint_health: dict, alerts: list, fallbac
     alert_count = len(alerts)
 
     prompt = f"""
-Eres el consultor senior de agilidad e IA de MCHAV Analytics. Genera un diagnóstico ejecutivo para el Líder Técnico.
+Eres el consultor senior de agilidad e IA de MCHAV Analytics. Genera un diagnóstico ejecutivo para el Planificador.
 
 Métricas del Proyecto ({proj_id}):
 - Salud Global del Sprint: {health_score}/100 pts.
@@ -147,11 +147,11 @@ Métricas del Proyecto ({proj_id}):
 - Eficiencia de Flujo: {flow_eff}%.
 - Alertas activas de cuellos de botella: {alert_count} alertas.
 
-Devuelve un JSON estrictamente válido con la siguiente estructura (sin comillas de código markdown extra):
+Devuelve un JSON strictly válido con la siguiente estructura (sin comillas de código markdown extra):
 {{
   "diagnostico_ejecutivo": "2 frases con la evaluación técnica general de la velocidad y salud.",
   "principal_riesgo": "1 frase detallando el mayor riesgo detectado en el sprint.",
-  "recomendacion_lider": "1 frase con la acción prioritaria para el Scrum Master o Líder Técnico."
+  "recomendacion_lider": "1 frase con la acción prioritaria para el Scrum Master o Planificador."
 }}
 """
 

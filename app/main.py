@@ -89,7 +89,7 @@ def startup_event():
         # Seeding de roles estándar del sistema (HU-004)
         roles_default = [
             {"nombre_rol": "Administrador", "scopes": "jira:read,jira:sync,projects:write,admin"},
-            {"nombre_rol": "Líder Técnico", "scopes": "jira:read,jira:sync,projects:write"},
+            {"nombre_rol": "Planificador", "scopes": "jira:read,jira:sync,projects:write"},
             {"nombre_rol": "Desarrollador", "scopes": "jira:read"}
         ]
         for r_info in roles_default:

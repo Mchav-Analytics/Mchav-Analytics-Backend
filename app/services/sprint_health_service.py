@@ -192,7 +192,7 @@ def calculate_sprint_health(
 
 
 def _build_gemini_insights(proyecto_id: str, health_score: int, commitment: float, scope_creep: float, flow_eff: float, bottleneck_text: str) -> dict:
-    """Genera diagnósticos analíticos ejecutivos para el Líder Técnico impulsados por Gemini."""
+    """Genera diagnósticos analíticos ejecutivos para el Planificador impulsados por Gemini."""
     fallback_insights = {
         "diagnostico_ejecutivo": f"El proyecto '{proyecto_id}' registra una salud general de {health_score}/100 pts con un cumplimiento de compromiso del {commitment}%.",
         "principal_riesgo": bottleneck_text or f"Desviación por alcance agregado de +{scope_creep} Story Points en el sprint actual.",
@@ -210,7 +210,7 @@ def _build_gemini_insights(proyecto_id: str, health_score: int, commitment: floa
         }
         return generate_lider_dashboard_insights(sprint_health_summary, [], fallback_insights)
     except Exception as e:
-        print("Error al generar insights de Gemini para Líder Técnico:", e)
+        print("Error al generar insights de Gemini para Planificador:", e)
         return fallback_insights
 
 
