@@ -28,7 +28,7 @@ def get_base_status(status_name: str, db: Session = None, project_id: str = None
     st = status_name.lower().strip()
     if st in ("done", "listo", "resuelto", "resolved", "cerrado", "closed", "finalizado"):
         return "DONE"
-    if st in ("in progress", "en progreso", "desarrollo", "in development", "doing", "active", "en desarrollo", "en revisión", "in review"):
+    if st in ("in progress", "en progreso", "desarrollo", "in development", "doing", "active", "en desarrollo", "en revisión", "in review", "en curso", "en testing", "en pruebas"):
         return "IN_PROGRESS"
     return "TODO"
 
@@ -79,6 +79,13 @@ def get_developer_scorecard_data(db: Session, proyecto_id: str, email_or_assigne
         sp = float(issue.story_points or 0.0)
         itype = (issue.issue_type or "Story").lower()
 
+        due_date = None
+        try:
+            if issue.sprint_activo and issue.sprint_activo.fecha_fin:
+                due_date = issue.sprint_activo.fecha_fin.isoformat()
+        except:
+            pass
+
         if "bug" in itype:
             bugs_count += 1
         elif "task" in itype or "tarea" in itype:
@@ -104,7 +111,10 @@ def get_developer_scorecard_data(db: Session, proyecto_id: str, email_or_assigne
             "cycle_time_days": round(ct_days, 1),
             "issue_type": issue.issue_type or "Story",
             "priority": issue.priority or "Medium",
-            "assignee_name": issue.assignee_name or "Sin Asignar"
+            "assignee_name": issue.assignee_name or "Sin Asignar",
+            "created_at": issue.created_at.isoformat() if issue.created_at else None,
+            "resolved_at": issue.resolved_at.isoformat() if issue.resolved_at else None,
+            "due_date": due_date
         })
 
     avg_ct = round(sum(cycle_times) / len(cycle_times), 1) if cycle_times else 0.0

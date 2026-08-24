@@ -12,13 +12,13 @@ load_dotenv(override=True)
 # CREDENTCIALES DE AUTENTICACIÓN JIRA OAUTH 2.0 (3LO)
 # -----------------------------------------------------------------------------
 # Identificador único del cliente registrado en Atlassian Developer Console
-CLIENT_ID = os.getenv("JIRA_CLIENT_ID", "").strip()
+CLIENT_ID = os.getenv("ATLASSIAN_CLIENT_ID", "").strip()
 
 # Clave secreta del cliente OAuth para intercambiar códigos de autorización
-CLIENT_SECRET = os.getenv("JIRA_CLIENT_SECRET", "").strip()
+CLIENT_SECRET = os.getenv("ATLASSIAN_CLIENT_SECRET", "").strip()
 
 # URL de redirección (Callback) donde Atlassian enviará el código de autorización
-CALLBACK_URL = os.getenv("JIRA_CALLBACK_URL", "").strip()
+CALLBACK_URL = os.getenv("ATLASSIAN_REDIRECT_URI", "").strip()
 
 # Clave secreta para la firma criptográfica HMAC SHA-256 de cookies de sesión
 SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "mchav_default_secret_key_123456").encode()
@@ -64,3 +64,9 @@ DOCS_USER = os.getenv("DOCS_USER", "admin").strip()
 
 # Contraseña para la autenticación HTTP Basic de la documentación
 DOCS_PASSWORD = os.getenv("DOCS_PASSWORD", "MchavDocs2026!Sec#Admin").strip()
+
+# -----------------------------------------------------------------------------
+# GOOGLE GEMINI AI
+# -----------------------------------------------------------------------------
+# Clave de API para el modelo generativo de Google Gemini (AI Dev Coach)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()

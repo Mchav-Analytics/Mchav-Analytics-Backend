@@ -164,3 +164,27 @@ def get_developer_scorecard_by_id(
     Obtiene las métricas individuales de un desarrollador específico por su ID o email.
     """
     return get_developer_scorecard_data(db, proyecto_id, email_or_assignee_id=assignee_id)
+
+from pydantic import BaseModel
+
+class TaskStatusUpdate(BaseModel):
+    status: str
+
+@router.patch("/me/agenda-tasks/{task_key}")
+def update_task_status(
+    task_key: str,
+    payload: TaskStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Actualiza el estado de una tarea asignada en la agenda (directo en BD local).
+    """
+    issue = db.query(models.Issue).filter(models.Issue.key_issue == task_key).first()
+    if issue:
+        issue.status_actual = payload.status
+        db.commit()
+        return {"status": "success", "issue_key": task_key, "new_status": payload.status}
+    
+    from fastapi import HTTPException
+    raise HTTPException(status_code=404, detail="Issue not found")

@@ -241,13 +241,43 @@ async def jira_webhook(payload: JiraWebhookPayload, db: Session = Depends(get_db
     resolved_at = parse_iso(fields.get("resolutiondate"))
     
     db_issue = issue_repo.get_by_key(db, issue_key)
+    
+    # Extraer campos adicionales (asignado, tipo, prioridad, SP) para que el frontend pueda filtrar
+    assignee_obj = fields.get("assignee") or {}
+    assignee_id = assignee_obj.get("accountId") or "UNASSIGNED"
+    assignee_name = assignee_obj.get("displayName") or ("Sin Asignar" if assignee_id == "UNASSIGNED" else "Usuario Jira")
+    assignee_email = assignee_obj.get("emailAddress") or ""
+
+    itype_obj = fields.get("issuetype") or {}
+    issue_type = itype_obj.get("name", "Story")
+
+    priority_obj = fields.get("priority") or {}
+    priority = priority_obj.get("name", "Medium")
+
+    sp_val = fields.get("customfield_10028") or fields.get("customfield_10016") or fields.get("customfield_10026") or fields.get("storypoints") or fields.get("customfield_10020")
+    if isinstance(sp_val, (int, float)):
+        story_pts = float(sp_val)
+    elif isinstance(sp_val, str):
+        try:
+            story_pts = float(sp_val)
+        except ValueError:
+            story_pts = 0.0
+    else:
+        story_pts = 0.0
+
     i_data = {
         "key_ticket": issue_key,
         "id_proyecto": db_project.id_proyecto,
         "resumen": summary,
         "estado": status_actual,
         "fecha_creacion": created_at,
-        "fecha_fin": resolved_at
+        "fecha_fin": resolved_at,
+        "assignee_id": assignee_id,
+        "assignee_name": assignee_name,
+        "assignee_email": assignee_email,
+        "issue_type": issue_type,
+        "priority": priority,
+        "story_points": story_pts
     }
     
     if not db_issue:

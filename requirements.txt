@@ -33,3 +33,4 @@ tenacity==8.2.3
 google-genai>=0.1.0
 
 
+google-generativeai==0.8.4
