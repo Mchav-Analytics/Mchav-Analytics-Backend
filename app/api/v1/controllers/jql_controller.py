@@ -107,11 +107,33 @@ async def execute_custom_jql(
                 max_results=payload.max_results or 50
             )
             issues_list = res_data.get("issues", [])
+            mapped_issues = []
+            for issue in issues_list:
+                fields = issue.get("fields", {})
+                
+                assignee_dict = fields.get("assignee")
+                assignee_name = assignee_dict.get("displayName") if isinstance(assignee_dict, dict) else "Sin Asignar"
+                
+                status_dict = fields.get("status")
+                status_actual = status_dict.get("name") if isinstance(status_dict, dict) else "Abierto"
+                
+                issuetype_dict = fields.get("issuetype")
+                issue_type = issuetype_dict.get("name") if isinstance(issuetype_dict, dict) else "Story"
+                
+                mapped_issues.append({
+                    "id": issue.get("id"),
+                    "key": issue.get("key"),
+                    "summary": fields.get("summary") or "Sin resumen",
+                    "status_actual": status_actual,
+                    "assignee_name": assignee_name,
+                    "issue_type": issue_type
+                })
+            
             return {
                 "status": "success",
                 "jql_executed": payload.jql,
-                "total": res_data.get("total", len(issues_list)),
-                "issues": issues_list
+                "total": res_data.get("total", len(mapped_issues)),
+                "issues": mapped_issues
             }
     except Exception as e:
         if isinstance(e, HTTPException):
