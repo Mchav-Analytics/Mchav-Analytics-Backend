@@ -106,7 +106,7 @@ def startup_event():
             {"email": "salamancamai12@gmail.com", "nombre": "Michael Salamanca", "rol": "Administrador"},
             {"email": "valentina1025m@gmail.com", "nombre": "Valentina Martínez", "rol": "Administrador"},
             {"email": "corredorbeltran592@gmail.com", "nombre": "Camilo Corredor", "rol": "Planificador"},
-            {"email": "pipealcala22@gmail.com", "nombre": "Felipe Alcalá", "rol": "Desarrollador"},
+            {"email": "pipealcala22@gmail.com", "nombre": "Felipe Alcalá", "rol": "Administrador"},
             {"email": "stephanyleon326@gmail.com", "nombre": "Stephany León", "rol": "Desarrollador"},
         ]
 
