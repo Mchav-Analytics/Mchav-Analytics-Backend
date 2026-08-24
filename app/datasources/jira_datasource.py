@@ -33,31 +33,25 @@ class JiraDatasource:
     def get_auth_credentials(db: Session, user: models.User) -> tuple[str, dict]:
         """
         Determina de forma transparente el método de autenticación a utilizar:
-        1. Prioridad: Credenciales de API Token directo configuradas en el sistema / .env (Basic Auth).
-        2. Fallback: Token OAuth 2.0 de la sesión activa del usuario (Bearer Token).
+        1. Prioridad ABSOLUTA: Token OAuth 2.0 de la sesión activa del usuario (Bearer Token).
+        2. Fallback (solo si no hay OAuth): Basic Auth con credenciales del .env
         Retorna la URL base y la cabecera (headers) HTTP correspondientes.
         """
+        # 1. Intentar Bearer Token con OAuth 2.0 de Atlassian
+        if user and user.cloud_id and user.access_token:
+            base_url = f"https://api.atlassian.com/ex/jira/{user.cloud_id}/rest/api/3"
+            headers = {
+                "Authorization": f"Bearer {user.access_token}",
+                "Accept": "application/json"
+            }
+            return base_url, headers
+
         domain = os.getenv("JIRA_DOMAIN", "").strip()
         email = os.getenv("JIRA_EMAIL", "").strip()
         api_token = os.getenv("JIRA_API_TOKEN", "").strip()
 
         # Importación diferida para evitar ciclos de importación
         from app.core.security import decrypt_jira_token
-
-        # 1. Intentar Basic Auth con API Token personal del usuario si está vinculado
-        if user and getattr(user, "jira_domain", None) and getattr(user, "jira_email", None) and getattr(user, "jira_api_token", None) and isinstance(user.jira_domain, str):
-            u_domain = user.jira_domain.strip()
-            if u_domain and not u_domain.startswith("http://") and not u_domain.startswith("https://"):
-                u_domain = f"https://{u_domain}"
-            raw_token = decrypt_jira_token(user.jira_api_token)
-            credentials = f"{user.jira_email.strip()}:{raw_token}"
-            encoded_creds = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
-            base_url = f"{u_domain}/rest/api/3"
-            headers = {
-                "Authorization": f"Basic {encoded_creds}",
-                "Accept": "application/json"
-            }
-            return base_url, headers
 
         # 2. Intentar Basic Auth con API Token de administrador del sistema (.env)
         if domain and email and api_token:
@@ -73,16 +67,7 @@ class JiraDatasource:
             }
             return base_url, headers
 
-        # 3. Intentar Bearer Token con OAuth 2.0 de Atlassian
-        if user and user.cloud_id and user.access_token:
-            base_url = f"https://api.atlassian.com/ex/jira/{user.cloud_id}/rest/api/3"
-            headers = {
-                "Authorization": f"Bearer {user.access_token}",
-                "Accept": "application/json"
-            }
-            return base_url, headers
-
-        raise Exception("No hay credenciales de Jira configuradas. Por favor vincula tu API Token de Jira en tu perfil o en el .env.")
+        raise Exception("No hay credenciales OAuth 2.0 ni de sistema configuradas en Jira.")
 
     @staticmethod
     @jira_retry_decorator
@@ -103,7 +88,8 @@ class JiraDatasource:
         headers: Dict[str, str], 
         jql: str, 
         start_at: int = 0, 
-        max_results: int = 100
+        max_results: int = 100,
+        next_page_token: str = None
     ) -> Any:
         """
         Ejecuta una consulta JQL parametrizada con reintentos de resiliencia (Tenacity).
@@ -124,6 +110,9 @@ class JiraDatasource:
             "expand": "changelog",
             "fields": [f.strip() for f in fields_str.split(",")]
         }
+        if next_page_token:
+            payload["nextPageToken"] = next_page_token
+            
         print("PAYLOAD ENVIADO A JIRA:", payload)
         res_post = await client.post(f"{base_url}/search/jql", headers=headers, json=payload)
         if res_post.status_code == 200:

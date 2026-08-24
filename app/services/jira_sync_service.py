@@ -143,10 +143,12 @@ async def sync_issues_for_project(
     except Exception as e:
         print(f"Advertencia obteniendo tableros y sprints para {project.key_proyecto}: {e}")
 
+    next_page_token = None
+    
     # 2. Descargar tickets via JQL y cargarlos en BD
     while True:
         data = await JiraDatasource.fetch_issues_jql(
-            client, base_jira_url, headers, jql, start_at=start_at, max_results=max_results
+            client, base_jira_url, headers, jql, start_at=start_at, max_results=max_results, next_page_token=next_page_token
         )
         
         issues = data.get("issues", [])
@@ -307,11 +309,18 @@ async def sync_issues_for_project(
 
             total_processed += 1
 
-        start_at += max_results
-        total = data.get("total", 0)
-        if start_at >= total:
-            break
-
+        next_page_token = data.get("nextPageToken")
+        is_last = data.get("isLast", False)
+        
+        # Si la API v3 retorna isLast o ya no hay nextPageToken, terminamos
+        if is_last or not next_page_token:
+            # Fallback legacy si la API anterior respondía con "total" (no es el caso de search/jql, pero por seguridad)
+            start_at += max_results
+            total = data.get("total", 0)
+            if not next_page_token and total > 0 and start_at >= total:
+                break
+            elif not next_page_token:
+                break
     return total_processed
 
 def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
