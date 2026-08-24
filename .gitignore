@@ -1,10 +1,15 @@
+# Environment variables
 .env
+
+# Python cache & virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 .venv/
 venv/
 env/
-**/__pycache__/
-*.pyc
-*.pyo
+ENV/
 .pytest_cache/
 backend/.pytest_cache/
 .coverage
@@ -12,3 +17,15 @@ htmlcov/
 *.egg-info/
 .mypy_cache/
 .ruff_cache/
+.cache/
+
+# IDE settings
+.vscode/
+.idea/
+
+# Local databases & docs
+*.db
+*.sqlite
+*.pdf
+test_report.pdf
+scratch/
