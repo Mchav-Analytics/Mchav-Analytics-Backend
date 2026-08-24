@@ -35,3 +35,5 @@ __all__ = [
     "AlertasSistema",
     "SolicitudesAyudaDev"
 ]
+
+from .issue_history import IssueHistory
