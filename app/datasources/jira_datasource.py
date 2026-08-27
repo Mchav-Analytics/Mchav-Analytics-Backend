@@ -176,35 +176,130 @@ class JiraDatasource:
         return res.json()
 
     @staticmethod
+    def get_system_credentials() -> tuple[str, dict]:
+        """Obtiene las credenciales administrativas de sistema (Basic Auth con API Token) desde .env."""
+        domain = os.getenv("JIRA_DOMAIN", "").strip()
+        email = os.getenv("JIRA_EMAIL", "").strip()
+        api_token = os.getenv("JIRA_API_TOKEN", "").strip()
+
+        from app.core.security import decrypt_jira_token
+
+        if domain and email and api_token:
+            if not domain.startswith("http://") and not domain.startswith("https://"):
+                domain = f"https://{domain}"
+            raw_system_token = decrypt_jira_token(api_token)
+            credentials = f"{email}:{raw_system_token}"
+            encoded_creds = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
+            base_url = f"{domain}/rest/api/3"
+            headers = {
+                "Authorization": f"Basic {encoded_creds}",
+                "Accept": "application/json",
+                "Content-Type": "application/json"
+            }
+            return base_url, headers
+        raise Exception("No hay credenciales de sistema configuradas en Jira.")
+
+    @staticmethod
+    def get_auth_credentials(db: Session, user: models.User) -> tuple[str, dict]:
+        """
+        Determina de forma transparente el método de autenticación a utilizar:
+        1. Prioridad: Token OAuth 2.0 de la sesión activa del usuario (Bearer Token).
+        2. Fallback: Basic Auth con credenciales del .env
+        Retorna la URL base y la cabecera (headers) HTTP correspondientes.
+        """
+        # 1. Intentar Bearer Token con OAuth 2.0 de Atlassian
+        if user and user.cloud_id and user.access_token:
+            base_url = f"https://api.atlassian.com/ex/jira/{user.cloud_id}/rest/api/3"
+            headers = {
+                "Authorization": f"Bearer {user.access_token}",
+                "Accept": "application/json",
+                "Content-Type": "application/json"
+            }
+            return base_url, headers
+
+        return JiraDatasource.get_system_credentials()
+
+    @staticmethod
     @jira_retry_decorator
     async def fetch_issue_transitions(
-        client: httpx.AsyncClient, 
-        base_url: str, 
-        headers: Dict[str, str], 
-        issue_id: str
+        client: httpx.AsyncClient,
+        base_url: str,
+        headers: Dict[str, str],
+        issue_id_or_key: str
     ) -> Any:
-        """Obtiene las transiciones permitidas (posibles cambios de estado) para un ticket específico."""
-        res = await client.get(f"{base_url}/issue/{issue_id}/transitions", headers=headers)
+        """Obtiene las transiciones de estado disponibles y permitidas actualmente para una issue en Jira."""
+        res = await client.get(f"{base_url}/issue/{issue_id_or_key}/transitions?expand=transitions.fields", headers=headers)
+        if res.status_code in (401, 403):
+            # Si el token OAuth carece de scope o expiró, intentar con credenciales de sistema
+            try:
+                sys_url, sys_headers = JiraDatasource.get_system_credentials()
+                res_sys = await client.get(f"{sys_url}/issue/{issue_id_or_key}/transitions?expand=transitions.fields", headers=sys_headers)
+                if res_sys.status_code == 200:
+                    return res_sys.json()
+            except Exception:
+                pass
         if res.status_code in (429, 502, 503, 504):
-            raise JiraTransientError(f"Error efímero de Jira transitions ({res.status_code})")
+            raise JiraTransientError(f"Error efímero al obtener transiciones de Jira ({res.status_code})")
         if res.status_code != 200:
-            return {"transitions": []}
+            raise Exception(f"Error al obtener transiciones para '{issue_id_or_key}' de Jira (HTTP {res.status_code}): {res.text}")
         return res.json()
 
     @staticmethod
     @jira_retry_decorator
-    async def post_issue_transition(
-        client: httpx.AsyncClient, 
-        base_url: str, 
-        headers: Dict[str, str], 
-        issue_id: str,
+    async def execute_issue_transition(
+        client: httpx.AsyncClient,
+        base_url: str,
+        headers: Dict[str, str],
+        issue_id_or_key: str,
         transition_id: str
-    ) -> bool:
-        """Envía una petición POST a Jira Cloud para realizar la transición de estado de un ticket."""
-        payload = {"transition": {"id": transition_id}}
-        res = await client.post(f"{base_url}/issue/{issue_id}/transitions", headers=headers, json=payload)
+    ) -> Any:
+        """Ejecuta una transición de estado en Jira Cloud mediante POST /issue/{key}/transitions."""
+        payload = {
+            "transition": {
+                "id": str(transition_id)
+            }
+        }
+        res = await client.post(f"{base_url}/issue/{issue_id_or_key}/transitions", headers=headers, json=payload)
+        
+        # Si el token OAuth del usuario tiene solo scope de lectura ("scope does not match"), fallback a credenciales de sistema
+        if res.status_code in (401, 403) and ("scope" in res.text.lower() or "unauthorized" in res.text.lower()):
+            try:
+                sys_url, sys_headers = JiraDatasource.get_system_credentials()
+                res_sys = await client.post(f"{sys_url}/issue/{issue_id_or_key}/transitions", headers=sys_headers, json=payload)
+                if res_sys.status_code in (200, 204):
+                    return {"status": "success", "status_code": res_sys.status_code}
+                elif res_sys.status_code not in (429, 502, 503, 504):
+                    raise Exception(f"Jira rechazó la transición (HTTP {res_sys.status_code}): {res_sys.text}")
+            except Exception as e:
+                if not isinstance(e, JiraTransientError):
+                    raise e
+
         if res.status_code in (429, 502, 503, 504):
-            raise JiraTransientError(f"Error efímero al aplicar transición en Jira ({res.status_code})")
+            raise JiraTransientError(f"Error efímero al ejecutar transición en Jira ({res.status_code})")
         if res.status_code not in (200, 204):
-            raise Exception(f"Error al cambiar estado en Jira ({res.status_code}): {res.text}")
-        return True
+            raise Exception(f"Jira rechazó la transición (HTTP {res.status_code}): {res.text}")
+        return {"status": "success", "status_code": res.status_code}
+
+    @staticmethod
+    @jira_retry_decorator
+    async def fetch_issue_details(
+        client: httpx.AsyncClient,
+        base_url: str,
+        headers: Dict[str, str],
+        issue_id_or_key: str
+    ) -> Any:
+        """Obtiene la información y estado actual de una issue directamente de Jira."""
+        res = await client.get(f"{base_url}/issue/{issue_id_or_key}?fields=summary,status,priority,issuetype,assignee,created,updated,resolutiondate", headers=headers)
+        if res.status_code in (401, 403):
+            try:
+                sys_url, sys_headers = JiraDatasource.get_system_credentials()
+                res_sys = await client.get(f"{sys_url}/issue/{issue_id_or_key}?fields=summary,status,priority,issuetype,assignee,created,updated,resolutiondate", headers=sys_headers)
+                if res_sys.status_code == 200:
+                    return res_sys.json()
+            except Exception:
+                pass
+        if res.status_code in (429, 502, 503, 504):
+            raise JiraTransientError(f"Error efímero al consultar issue en Jira ({res.status_code})")
+        if res.status_code != 200:
+            raise Exception(f"Error al consultar issue '{issue_id_or_key}' en Jira (HTTP {res.status_code}): {res.text}")
+        return res.json()
