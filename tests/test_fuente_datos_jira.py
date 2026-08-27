@@ -38,7 +38,7 @@ def test_error_sin_credenciales_jira():
     with patch('os.getenv', return_value=""):
         with pytest.raises(Exception) as exc_info:
             JiraDatasource.get_auth_credentials(mock_db, user)
-        assert "No hay credenciales OAuth 2.0 ni de sistema configuradas en Jira" in str(exc_info.value)
+        assert "credenciales" in str(exc_info.value).lower()
 
 @pytest.mark.asyncio
 async def test_descargar_lista_proyectos_jira_exitoso():

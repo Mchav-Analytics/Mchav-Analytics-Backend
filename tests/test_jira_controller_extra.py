@@ -19,7 +19,7 @@ async def test_get_issue_transitions():
          patch("app.api.v1.controllers.jira_controller.get_jira_auth_credentials", return_value=("http://jira/rest/api/3", {})), \
          patch("app.datasources.jira_datasource.JiraDatasource.fetch_issue_transitions", new_callable=AsyncMock, return_value={"transitions": []}):
         res = await get_issue_transitions("K-1", mock_req, mock_db)
-        assert res == {"transitions": []}
+        assert res.transitions == []
 
 @pytest.mark.asyncio
 async def test_transition_issue():
@@ -34,10 +34,12 @@ async def test_transition_issue():
     with patch("app.api.v1.deps.get_current_user_id", return_value=1), \
          patch("app.api.v1.deps.check_user_exists"), \
          patch("app.api.v1.controllers.jira_controller.get_jira_auth_credentials", return_value=("http://jira/rest/api/3", {})), \
-         patch("app.datasources.jira_datasource.JiraDatasource.post_issue_transition", new_callable=AsyncMock):
+         patch("app.datasources.jira_datasource.JiraDatasource.fetch_issue_transitions", new_callable=AsyncMock, return_value={"transitions": [{"id": "31", "name": "Done"}]}), \
+         patch("app.datasources.jira_datasource.JiraDatasource.execute_issue_transition", new_callable=AsyncMock), \
+         patch("app.datasources.jira_datasource.JiraDatasource.fetch_issue_details", new_callable=AsyncMock, return_value={"fields": {"status": {"name": "Done"}}}):
         res = await transition_issue("K1", payload, mock_req, mock_db)
-        assert res["status"] == "success"
-        assert res["new_status"] == "Done"
+        assert res["success"] is True
+        assert res["status"] == "Done"
 
 @pytest.mark.asyncio
 async def test_transition_issue_without_transition_id():
@@ -59,9 +61,10 @@ async def test_transition_issue_without_transition_id():
          patch("app.api.v1.deps.check_user_exists"), \
          patch("app.api.v1.controllers.jira_controller.get_jira_auth_credentials", return_value=("http://jira/rest/api/3", {})), \
          patch("app.datasources.jira_datasource.JiraDatasource.fetch_issue_transitions", new_callable=AsyncMock, return_value=valid_trans), \
-         patch("app.datasources.jira_datasource.JiraDatasource.post_issue_transition", new_callable=AsyncMock):
+         patch("app.datasources.jira_datasource.JiraDatasource.execute_issue_transition", new_callable=AsyncMock), \
+         patch("app.datasources.jira_datasource.JiraDatasource.fetch_issue_details", new_callable=AsyncMock, return_value={"fields": {"status": {"name": "DONE"}}}) :
         res = await transition_issue("K1", payload, mock_req, mock_db)
-        assert res["status"] == "success"
+        assert res["success"] is True
 
 @pytest.mark.asyncio
 async def test_jira_webhook():

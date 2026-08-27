@@ -67,10 +67,12 @@ def test_transition_issue_success(
     }
     
     with patch("app.datasources.jira_datasource.JiraDatasource.fetch_issue_transitions", new_callable=AsyncMock) as mock_fetch, \
-         patch("app.datasources.jira_datasource.JiraDatasource.post_issue_transition", new_callable=AsyncMock) as mock_post:
+         patch("app.datasources.jira_datasource.JiraDatasource.execute_issue_transition", new_callable=AsyncMock) as mock_post, \
+         patch("app.datasources.jira_datasource.JiraDatasource.fetch_issue_details", new_callable=AsyncMock) as mock_details:
         
         mock_fetch.return_value = mock_transitions
-        mock_post.return_value = True
+        mock_post.return_value = {"status": "success"}
+        mock_details.return_value = {"fields": {"status": {"name": "Listo"}}}
         
         res = client.post("/api/v1/jira/issues/MCHAV-101/transition", json={
             "target_status": "Listo",
@@ -79,6 +81,7 @@ def test_transition_issue_success(
         
         assert res.status_code == 200
         data = res.json()
-        assert data["status"] == "success"
+        assert data["success"] is True
+        assert data["status"] == "Listo"
         assert data["issue_key"] == "MCHAV-101"
         assert "actualizado" in data["message"]

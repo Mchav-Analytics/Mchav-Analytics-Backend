@@ -502,4 +502,6 @@ async def execute_issue_transition(
             "issue_key": issue_key,
             "status": updated_status,
             "message": f"Estado de {issue_key} actualizado a '{updated_status}' en Jira Cloud."
-        }
+        }
+
+transition_issue = execute_issue_transition

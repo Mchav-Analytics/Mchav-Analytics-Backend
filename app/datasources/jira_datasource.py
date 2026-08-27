@@ -280,6 +280,8 @@ class JiraDatasource:
             raise Exception(f"Jira rechazó la transición (HTTP {res.status_code}): {res.text}")
         return {"status": "success", "status_code": res.status_code}
 
+    post_issue_transition = execute_issue_transition
+
     @staticmethod
     @jira_retry_decorator
     async def fetch_issue_details(
