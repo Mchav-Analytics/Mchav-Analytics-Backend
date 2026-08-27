@@ -55,10 +55,6 @@ class WebhookResponse(BaseModel):
     reason: Optional[str] = None
     issue: Optional[str] = None
 
-class IssueTransitionRequest(BaseModel):
-    target_status: str
-    transition_id: Optional[str] = None
-
 # Router principal del controlador de Jira
 from app.core.security import get_current_user
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -140,22 +136,38 @@ async def get_jira_metrics(
 async def trigger_jira_sync(
     request: Request,
     background_tasks: BackgroundTasks, 
+    wait: bool = False,
     db: Session = Depends(get_db)
 ):
     """
     POST /api/v1/jira/sync
-    Lanza el proceso de sincronización completa ETL como una tarea en segundo plano no bloqueante.
-    HU-007 CA-03: Si existe una sincronización en proceso, bloquea e informa al usuario.
+    Lanza el proceso de sincronización completa ETL.
+    Si wait=True, ejecuta la sincronización y responde cuando haya finalizado.
     """
     user_id = deps.get_current_user_id(request)
     user = deps.check_user_exists(db, user_id)
     
     if log_repo.has_running_sync(db):
+        if wait:
+            # Esperar activamente hasta 15 segundos a que la sincronización en curso termine
+            for _ in range(30):
+                await asyncio.sleep(0.5)
+                if not log_repo.has_running_sync(db):
+                    return {"message": "Sincronización completada con éxito"}
+            return {"message": "Sincronización en curso"}
         raise HTTPException(
             status_code=400,
             detail="Ya existe una sincronización en proceso de ejecución. Por favor espera a que finalice antes de iniciar una nueva."
         )
         
+    if wait:
+        try:
+            from app.services.jira_sync_service import async_run_jira_sync
+            await async_run_jira_sync(user.id_usuario, tipo_sincronizacion="AUTO_VIEW")
+            return {"message": "Sincronización completada con éxito"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error durante la sincronización: {str(e)}")
+
     # Encolar la tarea asíncrona de sincronización
     background_tasks.add_task(run_jira_sync_task, user.id_usuario)
     return {"message": "Sincronización iniciada en segundo plano"}
@@ -291,7 +303,34 @@ async def jira_webhook(payload: JiraWebhookPayload, db: Session = Depends(get_db
     return {"status": "success", "issue": issue_key}
 
 
-@router.get("/issues/{issue_key}/transitions")
+# ── NUEVOS ENDPOINTS PARA GESTIÓN Y CAMBIO REAL DE ESTADOS EN JIRA CLOUD ──
+
+from app.datasources.jira_datasource import JiraDatasource
+
+class IssueTransitionRequest(BaseModel):
+    transition_id: Optional[str] = None
+    target_status: Optional[str] = None
+
+class TransitionItem(BaseModel):
+    id: str
+    name: str
+    to_status: str
+    category: Optional[str] = None
+
+class IssueTransitionsResponse(BaseModel):
+    issue_key: str
+    transitions: List[TransitionItem]
+
+@router.get(
+    "/issues/{issue_key}/transitions",
+    response_model=IssueTransitionsResponse,
+    summary="Consultar transiciones disponibles de una issue en Jira Cloud"
+)
+@router.get(
+    "/issues/{issue_key}/transition",
+    response_model=IssueTransitionsResponse,
+    include_in_schema=False
+)
 async def get_issue_transitions(
     issue_key: str,
     request: Request,
@@ -299,110 +338,168 @@ async def get_issue_transitions(
 ):
     """
     GET /api/v1/jira/issues/{issue_key}/transitions
-    Consulta en tiempo real en Jira Cloud las transiciones válidas disponibles para una incidencia.
+    Consulta en tiempo real a Jira Cloud las transiciones válidas y permitidas para la issue.
     """
     user_id = deps.get_current_user_id(request)
     user = deps.check_user_exists(db, user_id)
     base_jira_url, headers = get_jira_auth_credentials(db, user)
-
-    from app.datasources.jira_datasource import JiraDatasource
+    
     async with httpx.AsyncClient(timeout=15.0) as client:
-        transitions_data = await JiraDatasource.fetch_issue_transitions(client, base_jira_url, headers, issue_key)
-        return transitions_data
+        try:
+            try:
+                data = await JiraDatasource.fetch_issue_transitions(client, base_jira_url, headers, issue_key)
+            except Exception as first_err:
+                if "401" in str(first_err) or "unauthorized" in str(first_err).lower():
+                    from app.services.jira_sync_service import refresh_user_token
+                    new_token = await refresh_user_token(db, user, client)
+                    if new_token:
+                        base_jira_url, headers = get_jira_auth_credentials(db, user)
+                        data = await JiraDatasource.fetch_issue_transitions(client, base_jira_url, headers, issue_key)
+                    else:
+                        raise first_err
+                else:
+                    raise first_err
 
+            raw_transitions = data.get("transitions", [])
+            transitions_list = []
+            for t in raw_transitions:
+                t_id = str(t.get("id"))
+                t_name = t.get("name", "")
+                to_obj = t.get("to", {}) or {}
+                to_status = to_obj.get("name", t_name)
+                category_obj = to_obj.get("statusCategory", {}) or {}
+                cat_key = category_obj.get("key", "indeterminate")
+                transitions_list.append(TransitionItem(
+                    id=t_id,
+                    name=t_name,
+                    to_status=to_status,
+                    category=cat_key
+                ))
+            return IssueTransitionsResponse(issue_key=issue_key, transitions=transitions_list)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Error consultando transiciones en Jira: {str(e)}")
 
-@router.post("/issues/{issue_key}/transition")
-async def transition_issue(
+@router.post(
+    "/issues/{issue_key}/transitions",
+    summary="Ejecutar cambio real de estado de una issue en Jira Cloud"
+)
+@router.post(
+    "/issues/{issue_key}/transition",
+    include_in_schema=False
+)
+@router.patch(
+    "/issues/{issue_key}/status",
+    include_in_schema=False
+)
+async def execute_issue_transition(
     issue_key: str,
     payload: IssueTransitionRequest,
     request: Request,
     db: Session = Depends(get_db)
 ):
     """
-    POST /api/v1/jira/issues/{issue_key}/transition
-    Ejecuta el cambio de estado de un ticket directamente en Jira Cloud y actualiza la BD local.
+    POST /api/v1/jira/issues/{issue_key}/transitions
+    Ejecuta la transición real en Jira Cloud mediante REST API v3, verifica el cambio y actualiza BD local.
     """
     user_id = deps.get_current_user_id(request)
     user = deps.check_user_exists(db, user_id)
     base_jira_url, headers = get_jira_auth_credentials(db, user)
-
-    from app.datasources.jira_datasource import JiraDatasource
     
-    target = payload.target_status.strip().upper()
-    transition_id = payload.transition_id
-    new_status_name = payload.target_status
-
     async with httpx.AsyncClient(timeout=20.0) as client:
-        # Si no nos pasaron el transition_id explícito, obtener las transiciones válidas de Jira
-        if not transition_id:
-            try:
-                transitions_res = await JiraDatasource.fetch_issue_transitions(client, base_jira_url, headers, issue_key)
-                valid_transitions = transitions_res.get("transitions", [])
-
-                matched = None
-                for t in valid_transitions:
-                    t_name = t.get("name", "").strip().upper()
-                    t_to_name = t.get("to", {}).get("name", "").strip().upper()
-                    t_id = str(t.get("id"))
-
-                    if target in t_name or target in t_to_name or (target == "DONE" and any(w in t_to_name for w in ["LISTO", "FINALIZADO", "DONE", "RESOLVED", "CERRADO"])) or (target in ("IN_PROGRESS", "EN_PROGRESO") and any(w in t_to_name for w in ["PROGRESO", "PROGRESS", "DESARROLLO"])) or (target in ("TO_DO", "POR_HACER", "PENDING") and any(w in t_to_name for w in ["HACER", "TODO", "BACKLOG", "OPEN"])):
-                        matched = t_id
-                        new_status_name = t.get("to", {}).get("name", payload.target_status)
-                        break
-                
-                if not matched and valid_transitions:
-                    matched = str(valid_transitions[0].get("id"))
-                    new_status_name = valid_transitions[0].get("to", {}).get("name", payload.target_status)
-
-                if matched:
-                    transition_id = matched
-            except Exception as e:
-                print("Aviso al obtener transiciones de Jira Cloud:", e)
-
-        # Si tenemos transition_id, enviarlo a Jira Cloud
-        if transition_id:
-            try:
-                await JiraDatasource.post_issue_transition(client, base_jira_url, headers, issue_key, transition_id)
-            except Exception as e:
-                print("Aviso al aplicar transición HTTP en Jira Cloud:", e)
-
-    # Actualizar la base de datos PostgreSQL local de inmediato
-    db_issue = db.query(models.Issue).filter(
-        (models.Issue.key_issue == issue_key) | (models.Issue.id_jira == issue_key)
-    ).first()
-
-    old_status = "TO_DO"
-    if db_issue:
-        old_status = db_issue.status_actual or "TO_DO"
-        db_issue.status_actual = new_status_name
-        
-        status_upper = new_status_name.upper()
-        if any(w in status_upper for w in ["DONE", "LISTO", "FINALIZADO", "CERRADO", "RESOLVED"]):
-            db_issue.status_base = "DONE"
-            db_issue.resolved_at = datetime.utcnow()
-        elif any(w in status_upper for w in ["PROGRESS", "PROGRESO", "DESARROLLO"]):
-            db_issue.status_base = "IN_PROGRESS"
-        else:
-            db_issue.status_base = "TO_DO"
-        
-        db.commit()
-
+        # 1. Obtener transiciones disponibles para validar (con auto-refresh)
         try:
-            new_trans = models.TransicionEstado(
-                id_jira=db_issue.id_jira,
-                from_status=old_status,
-                to_status=new_status_name,
-                transition_date=datetime.utcnow()
-            )
-            db.add(new_trans)
-            db.commit()
+            try:
+                data = await JiraDatasource.fetch_issue_transitions(client, base_jira_url, headers, issue_key)
+            except Exception as first_err:
+                if "401" in str(first_err) or "unauthorized" in str(first_err).lower():
+                    from app.services.jira_sync_service import refresh_user_token
+                    new_token = await refresh_user_token(db, user, client)
+                    if new_token:
+                        base_jira_url, headers = get_jira_auth_credentials(db, user)
+                        data = await JiraDatasource.fetch_issue_transitions(client, base_jira_url, headers, issue_key)
+                    else:
+                        raise first_err
+                else:
+                    raise first_err
+        except Exception as err:
+            raise HTTPException(status_code=502, detail=f"No fue posible comunicarse con Jira. {str(err)}")
+            
+        available = data.get("transitions", [])
+        
+        target_t_id = payload.transition_id
+        target_name = payload.target_status
+        
+        chosen_transition = None
+        if target_t_id:
+            chosen_transition = next((t for t in available if str(t.get("id")) == str(target_t_id)), None)
+        elif target_name:
+            norm_target = target_name.strip().lower()
+            # Mapeo de sinónimos comunes
+            synonyms = {
+                "por hacer": ["to do", "por hacer", "open", "abierto", "backlog"],
+                "en curso": ["in progress", "en curso", "en progreso", "in development", "desarrollando", "doing"],
+                "en revisión": ["in review", "en revisión", "en revision", "review", "code review", "peer review", "qa"],
+                "bloqueada": ["blocked", "bloqueada", "impediment", "detenido"],
+                "finalizado": ["done", "finalizado", "finalizada", "listo", "resolved", "closed", "completada"]
+            }
+            target_syns = synonyms.get(norm_target, [norm_target])
+            
+            for t in available:
+                t_name = (t.get("name") or "").strip().lower()
+                to_name = (t.get("to", {}).get("name") or "").strip().lower()
+                if any(s in t_name or s in to_name for s in target_syns):
+                    chosen_transition = t
+                    break
+        
+        if not chosen_transition:
+            if target_t_id:
+                chosen_transition = {"id": target_t_id, "name": target_name or "Transición"}
+            elif available:
+                names = [t.get("name") for t in available]
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Esta transición no está disponible para esta tarea en Jira. Opciones disponibles: {', '.join(names)}"
+                )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No hay transiciones de estado disponibles para la issue '{issue_key}' en Jira."
+                )
+            
+        trans_id_to_exec = str(chosen_transition.get("id"))
+        
+        # 2. Ejecutar la transición en Jira Cloud
+        try:
+            await JiraDatasource.execute_issue_transition(client, base_jira_url, headers, issue_key, trans_id_to_exec)
+        except Exception as exec_err:
+            raise HTTPException(status_code=502, detail=f"Jira rechazó la transición: {str(exec_err)}")
+        
+        # 3. Consultar la issue en Jira para confirmar el nuevo estado
+        try:
+            issue_details = await JiraDatasource.fetch_issue_details(client, base_jira_url, headers, issue_key)
+            updated_status = issue_details.get("fields", {}).get("status", {}).get("name", "Actualizado")
         except Exception:
-            db.rollback()
-
-    return {
-        "status": "success",
-        "issue_key": issue_key,
-        "old_status": old_status,
-        "new_status": new_status_name,
-        "message": f"Estado del ticket {issue_key} actualizado a '{new_status_name}' exitosamente en Jira Cloud y MCHAV Analytics."
-    }
+            updated_status = chosen_transition.get("to", {}).get("name") or chosen_transition.get("name") or "Actualizado"
+            
+        # 4. Actualizar la base de datos local
+        db_issue = issue_repo.get_by_key(db, issue_key)
+        if db_issue:
+            update_data = {"status_actual": updated_status}
+            norm_up = updated_status.lower()
+            if any(k in norm_up for k in ["done", "finaliz", "listo", "resolved", "closed", "completad"]):
+                if not db_issue.resolved_at:
+                    from datetime import timezone
+                    update_data["resolved_at"] = datetime.now(timezone.utc)
+            issue_repo.update(db, db_obj=db_issue, obj_in=update_data)
+            if db_issue.id_proyecto:
+                try:
+                    calculate_and_save_kpis(db, db_issue.id_proyecto)
+                except Exception:
+                    pass
+                    
+        return {
+            "success": True,
+            "issue_key": issue_key,
+            "status": updated_status,
+            "message": f"Estado de {issue_key} actualizado a '{updated_status}' en Jira Cloud."
+        }

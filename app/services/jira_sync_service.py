@@ -24,11 +24,11 @@ def get_jira_auth_credentials(db: Session, user: models.User) -> tuple[str, dict
 async def refresh_user_token(db: Session, user: models.User, client: httpx.AsyncClient):
     """Intercambia el refresh_token almacenado por un nuevo access_token cuando el previo expira."""
     token_url = "https://auth.atlassian.com/oauth/token"
-    client_id = os.getenv("JIRA_CLIENT_ID", "").strip()
-    client_secret = os.getenv("JIRA_CLIENT_SECRET", "").strip()
+    client_id = (os.getenv("ATLASSIAN_CLIENT_ID") or os.getenv("JIRA_CLIENT_ID", "")).strip()
+    client_secret = (os.getenv("ATLASSIAN_CLIENT_SECRET") or os.getenv("JIRA_CLIENT_SECRET", "")).strip()
     
-    if not user.refresh_token:
-        return
+    if not user or not user.refresh_token:
+        return None
         
     data = {
         "grant_type": "refresh_token",
@@ -40,11 +40,16 @@ async def refresh_user_token(db: Session, user: models.User, client: httpx.Async
     res = await client.post(token_url, json=data)
     if res.status_code == 200:
         tokens = res.json()
+        new_access = tokens.get("access_token")
+        new_refresh = tokens.get("refresh_token", user.refresh_token)
         user_repo.update(db, db_obj=user, obj_in={
-            "access_token": tokens.get("access_token"),
-            "refresh_token": tokens.get("refresh_token", user.refresh_token)
+            "access_token": new_access,
+            "refresh_token": new_refresh
         })
-        print(f"[OAuth] Token actualizado para el usuario {user.id_usuario}")
+        db.commit()
+        print(f"[OAuth] Token actualizado exitosamente para el usuario {user.id_usuario}")
+        return new_access
+    return None
 
 async def sync_projects(client: httpx.AsyncClient, base_jira_url: str, headers: dict, db: Session, user: models.User):
     """
@@ -347,15 +352,13 @@ async def sync_issues_for_project(
                 break
     return total_processed
 
-def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
+async def async_run_jira_sync(user_id: int, tipo_sincronizacion: str = "MANUAL"):
     """
-    Función de entrada para BackgroundTasks de FastAPI.
-    Abre una conexión independiente a la base de datos (SessionLocal), crea una entrada en logs_sincronizacion,
-    ejecuta la extracción asíncrona, recalcula los KPIs y marca el log como SUCCESS o ERROR registrando el traceback.
+    Función asíncrona nativa para ejecutar el proceso completo de sincronización ETL.
     """
     db = SessionLocal()
-    log_entry = None
     start_time = time.time()
+    log_entry = None
     total_issues = 0
 
     try:
@@ -382,20 +385,16 @@ def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
         base_jira_url, headers = get_jira_auth_credentials(db, user)
         base_agile_url = base_jira_url.replace("/rest/api/3", "/rest/agile/1.0")
 
-        async def _async_sync():
-            nonlocal total_issues
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                projects = await sync_projects(client, base_jira_url, headers, db, user)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            projects = await sync_projects(client, base_jira_url, headers, db, user)
+            
+            for project in projects:
+                count = await sync_issues_for_project(client, base_jira_url, base_agile_url, headers, db, project)
+                total_issues += count
                 
-                for project in projects:
-                    count = await sync_issues_for_project(client, base_jira_url, base_agile_url, headers, db, project)
-                    total_issues += count
-                    
-                    # Calcular y guardar las agregaciones KPI para el proyecto
-                    calculate_and_save_kpis(db, project.id_proyecto)
-                    print(f"SUCCESS: KPIs calculados para el proyecto {project.id_proyecto}")
-
-        asyncio.run(_async_sync())
+                # Calcular y guardar las agregaciones KPI para el proyecto
+                calculate_and_save_kpis(db, project.id_proyecto)
+                print(f"SUCCESS: KPIs calculados para el proyecto {project.id_proyecto}")
 
         duration = int(time.time() - start_time)
         log_repo.update(db, db_obj=log_entry, obj_in={
@@ -422,6 +421,24 @@ def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
     finally:
         db.close()
 
+def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
+    """
+    Función síncrona/hilo seguro para ejecutar la sincronización ETL.
+    Funciona de forma transparente tanto en scripts independientes como en background tasks de FastAPI.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(lambda: asyncio.run(async_run_jira_sync(user_id, tipo_sincronizacion)))
+            return future.result()
+    else:
+        return asyncio.run(async_run_jira_sync(user_id, tipo_sincronizacion))
+
 async def run_jira_sync(user_id: int, db: Session, tipo_sincronizacion: str = "MANUAL"):
     """Wrapper asíncrono para ejecutar la sincronización directamente."""
-    run_jira_sync_task(user_id, tipo_sincronizacion)
+    await async_run_jira_sync(user_id, tipo_sincronizacion)
