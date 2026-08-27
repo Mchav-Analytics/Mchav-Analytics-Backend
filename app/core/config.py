@@ -3,22 +3,28 @@
 # Carga variables de entorno desde el archivo .env y expone constantes tipadas
 
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Cargar variables de entorno anulando cualquier valor previo en el sistema
-load_dotenv(override=True)
+# Cargar variables de entorno asegurando la ruta absoluta del archivo .env
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+env_path = BASE_DIR / ".env"
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path, override=True)
+else:
+    load_dotenv(override=True)
 
 # -----------------------------------------------------------------------------
 # CREDENTCIALES DE AUTENTICACIÓN JIRA OAUTH 2.0 (3LO)
 # -----------------------------------------------------------------------------
 # Identificador único del cliente registrado en Atlassian Developer Console
-CLIENT_ID = os.getenv("ATLASSIAN_CLIENT_ID", "").strip()
+CLIENT_ID = os.getenv("JIRA_CLIENT_ID", "").strip() or os.getenv("ATLASSIAN_CLIENT_ID", "").strip()
 
 # Clave secreta del cliente OAuth para intercambiar códigos de autorización
-CLIENT_SECRET = os.getenv("ATLASSIAN_CLIENT_SECRET", "").strip()
+CLIENT_SECRET = os.getenv("JIRA_CLIENT_SECRET", "").strip() or os.getenv("ATLASSIAN_CLIENT_SECRET", "").strip()
 
 # URL de redirección (Callback) donde Atlassian enviará el código de autorización
-CALLBACK_URL = os.getenv("ATLASSIAN_REDIRECT_URI", "").strip()
+CALLBACK_URL = os.getenv("JIRA_CALLBACK_URL", "").strip() or os.getenv("ATLASSIAN_REDIRECT_URI", "").strip()
 
 # Clave secreta para la firma criptográfica HMAC SHA-256 de cookies de sesión
 SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "mchav_default_secret_key_123456").encode()
