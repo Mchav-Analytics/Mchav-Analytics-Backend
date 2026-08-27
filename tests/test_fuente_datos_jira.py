@@ -6,7 +6,7 @@ from app.models.auth import User
 def test_obtener_credenciales_jira_desde_env():
     """Verifica autenticación por variables de entorno JIRA_DOMAIN, JIRA_EMAIL, JIRA_API_TOKEN."""
     mock_db = MagicMock()
-    mock_user = MagicMock()
+    mock_user = MagicMock(cloud_id=None, access_token=None)
     
     with patch('os.getenv') as mock_env:
         mock_env.side_effect = lambda key, default="": {
@@ -38,7 +38,7 @@ def test_error_sin_credenciales_jira():
     with patch('os.getenv', return_value=""):
         with pytest.raises(Exception) as exc_info:
             JiraDatasource.get_auth_credentials(mock_db, user)
-        assert "No hay credenciales de Jira" in str(exc_info.value)
+        assert "No hay credenciales OAuth 2.0 ni de sistema configuradas en Jira" in str(exc_info.value)
 
 @pytest.mark.asyncio
 async def test_descargar_lista_proyectos_jira_exitoso():

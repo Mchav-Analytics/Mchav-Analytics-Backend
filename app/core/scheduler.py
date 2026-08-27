@@ -28,7 +28,7 @@ def scheduled_sync_job():
         admin_user = db.query(user_repo.model).filter(user_repo.model.activo.is_(True)).first()
         if admin_user:
             print(f"[Cron Scheduler] Adquiriendo candado y ejecutando job de sincronización para usuario ID {admin_user.id_usuario}...")
-            asyncio.run(run_jira_sync(admin_user.id_usuario, sync_type="AUTOMATIC"))
+            asyncio.run(run_jira_sync(admin_user.id_usuario, db, tipo_sincronizacion="AUTOMATIC"))
             print("[Cron Scheduler] Sincronización automática distribuida finalizada con éxito.")
         else:
             print("[Cron Scheduler] No se encontró ningún usuario activo para ejecutar el job.")

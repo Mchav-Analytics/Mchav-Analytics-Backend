@@ -74,8 +74,8 @@ async def get_historical_report(
         target_date = datetime(year, m, last_day, 23, 59, 59)
         
         # Obtener todos los tickets que tuvieron actividad hasta ese mes
-        from app.models.jira import JiraIssue
-        issues = db.query(JiraIssue).filter(JiraIssue.id_proyecto == proyecto_id).all()
+        from app.models.jira import Issue
+        issues = db.query(Issue).filter(Issue.id_proyecto == proyecto_id).all()
         
         total_puntos_historicos = 0
         total_tickets_historicos = 0
