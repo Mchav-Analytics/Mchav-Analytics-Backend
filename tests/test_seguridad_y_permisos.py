@@ -66,7 +66,7 @@ def test_obtener_usuario_actual_desde_token_bearer():
             security_scopes=scopes,
             request=req,
             db=mock_db,
-            token_header="5.valid_signed_token"
+            token="5.valid_signed_token"
         )
         assert user.id_usuario == 5
 
@@ -85,8 +85,7 @@ def test_obtener_usuario_actual_desde_cookie_sesion():
             security_scopes=scopes,
             request=req,
             db=mock_db,
-            token_header=None,
-            token_password=None
+            token=None
         )
         assert user.id_usuario == 8
 
@@ -101,8 +100,7 @@ def test_rechazar_usuario_sin_autenticacion():
             security_scopes=scopes,
             request=req,
             db=mock_db,
-            token_header=None,
-            token_password=None
+            token=None
         )
     assert exc_info.value.status_code == 401
 

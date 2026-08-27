@@ -297,7 +297,8 @@ async def sync_issues_for_project(
                     t_date = datetime.fromisoformat(created_t.replace("Z", "+00:00")) if created_t else datetime.now(timezone.utc)
                     
                     for item in history.get("items", []):
-                        if item.get("field") == "status":
+                        field_name = item.get("field")
+                        if field_name == "status":
                             from_status = item.get("fromString")
                             to_status = item.get("toString")
                             
@@ -309,6 +310,29 @@ async def sync_issues_for_project(
                                     "estado_nuevo": to_status,
                                     "fecha_cambio": t_date
                                 })
+                        
+                        # GUARDAR EN EL HISTORIAL INMUTABLE (Event Sourcing)
+                        if field_name in ["status", "story_points", "Story point estimate", "assignee", "priority", "Sprint"]:
+                            from_str = item.get("fromString")
+                            to_str = item.get("toString")
+                            
+                            from app.models.issue_history import IssueHistory
+                            existing = db.query(IssueHistory).filter(
+                                IssueHistory.id_jira == db_issue.id_jira,
+                                IssueHistory.fecha_cambio == t_date,
+                                IssueHistory.campo_modificado == field_name
+                            ).first()
+                            
+                            if not existing:
+                                new_history = IssueHistory(
+                                    id_jira=db_issue.id_jira,
+                                    campo_modificado=field_name,
+                                    valor_anterior=from_str,
+                                    valor_nuevo=to_str,
+                                    fecha_cambio=t_date
+                                )
+                                db.add(new_history)
+                                db.commit()
             except Exception as e:
                 print(f"Error procesando historial para {issue_key}: {e}")
 

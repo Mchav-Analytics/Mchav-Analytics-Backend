@@ -374,12 +374,13 @@ async def save_project_mappings(
 async def get_project_percentiles(
     request: Request,
     proyecto_id: str,
+    days: int = 15,
     db: Session = Depends(get_db)
 ):
     """
-    GET /api/v1/projects/{proyecto_id}/percentiles
+    GET /api/v1/projects/{proyecto_id}/percentiles?days=15
     [HU-014] Obtiene los percentiles P25, P50, P75, P90 del Lead Time y Cycle Time 
-    de los últimos 15 días, agrupados por tipo de tarea.
+    de los últimos N días (por defecto 15), agrupados por tipo de tarea.
     """
     # Verificación de usuario
     user_id = deps.get_current_user_id(request)
@@ -417,7 +418,7 @@ async def get_project_percentiles(
         in_progress_statuses = {"in progress", "en progreso", "desarrollo", "doing"}
 
     # 3. Consultar la BD para obtener los tickets
-    raw_issues = issue_repo.get_recent_resolved_issues_raw(db, real_project_id, in_progress_statuses, days=15)
+    raw_issues = issue_repo.get_recent_resolved_issues_raw(db, real_project_id, in_progress_statuses, days=days)
     
     # 4. Delegar el cálculo estadístico al servicio
     results = calculate_percentiles(raw_issues)

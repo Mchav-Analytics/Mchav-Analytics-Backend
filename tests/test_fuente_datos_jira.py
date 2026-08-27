@@ -60,13 +60,12 @@ async def test_consultar_issues_jql_estrategia_3_capas():
     mock_client.get = AsyncMock()
     mock_client.post = AsyncMock()
     
-    res1 = MagicMock(status_code=404)
-    res2 = MagicMock(status_code=404)
-    res3 = MagicMock(status_code=200)
-    res3.json.return_value = {"issues": [{"id": "101", "key": "P1-1"}]}
+    res_post = MagicMock(status_code=404)
+    res_get = MagicMock(status_code=200)
+    res_get.json.return_value = {"issues": [{"id": "101", "key": "P1-1"}]}
     
-    mock_client.get.side_effect = [res1, res3]
-    mock_client.post.return_value = res2
+    mock_client.post.return_value = res_post
+    mock_client.get.return_value = res_get
     
     data = await JiraDatasource.fetch_issues_jql(mock_client, "http://jira", {}, "project = P1")
     assert "issues" in data

@@ -3,7 +3,18 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from app.main import app
 
+from app.core.security import get_current_user, sign_session_id
+from app.models.auth import User, Role
+
 client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    mock_role = Role(nombre_rol="Administrador", scopes="jira:read,jira:sync,projects:write,admin")
+    mock_user = User(id_usuario=1, email="test@mchav.com", activo=True, rol=mock_role)
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 @patch('app.api.v1.controllers.projects_controller.deps.get_current_user_id')
 @patch('app.api.v1.controllers.projects_controller.deps.check_user_exists')
@@ -17,7 +28,7 @@ def test_obtener_sprints_de_proyecto(mock_sprint_repo, mock_check_user, mock_use
     
     response = client.get(
         "/api/v1/projects/PROJ-1/sprints",
-        cookies={"session_id": "1.mocked"}
+        cookies={"session_id": sign_session_id(1)}
     )
     assert response.status_code == 200
     assert len(response.json()) == 1
@@ -35,7 +46,7 @@ def test_obtener_estados_unicos_de_proyecto(mock_trans_repo, mock_issue_repo, mo
     
     response = client.get(
         "/api/v1/projects/PROJ-1/statuses",
-        cookies={"session_id": "1.mocked"}
+        cookies={"session_id": sign_session_id(1)}
     )
     assert response.status_code == 200
     statuses = response.json()
@@ -54,7 +65,7 @@ def test_obtener_reglas_mapeo_de_proyecto(mock_mapping_repo, mock_check_user, mo
     
     response = client.get(
         "/api/v1/projects/PROJ-1/mappings",
-        cookies={"session_id": "1.mocked"}
+        cookies={"session_id": sign_session_id(1)}
     )
     assert response.status_code == 200
     assert response.json()[0]["estado_jira"] == "Doing"

@@ -109,7 +109,7 @@ def determine_quadrant(
         return {
             "codigo": "ATASCADO",
             "nombre": "Atascado / Requiere Apoyo",
-            "descripcion": "Tiempos de desarrollo prolongados e incidencias técnicas. Requiere pairing o apoyo del Líder Técnico.",
+            "descripcion": "Tiempos de desarrollo prolongados e incidencias técnicas. Requiere pairing o apoyo del Planificador.",
             "color": "rose"
         }
 

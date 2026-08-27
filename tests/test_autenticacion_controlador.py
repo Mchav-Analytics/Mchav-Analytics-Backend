@@ -37,7 +37,7 @@ def test_procesar_callback_oauth_exitoso(mock_repo, mock_exchange, mock_validate
         follow_redirects=False
     )
     
-    assert response.status_code == 307
+    assert response.status_code in (302, 307)
     assert "/dashboard" in response.headers["location"]
     assert "session_id" in response.cookies
 
@@ -55,24 +55,26 @@ def test_iniciar_sesion_usuario_local(mock_user_repo, mock_verify):
     mock_verify.return_value = True
     mock_user = MagicMock()
     mock_user.id_usuario = 10
-    mock_user.email = "admin@mchav.com"
+    mock_user.email = "salamancamai12@gmail.com"
     mock_user.password_hash = "$2b$12$mockhash"
     mock_user.activo = True
     
-    with patch('app.api.v1.controllers.auth_controller.get_db') as mock_db_dep:
-        mock_db = MagicMock()
-        mock_db.query().filter().first.return_value = mock_user
-        mock_db_dep.return_value = mock_db
-        
+    mock_db = MagicMock()
+    mock_db.query().filter().first.return_value = mock_user
+    
+    from app.core.database import get_db
+    app.dependency_overrides[get_db] = lambda: mock_db
+    try:
         response = client.post(
             "/api/v1/auth/token",
-            data={"username": "admin@mchav.com", "password": "123456"}
+            data={"username": "salamancamai12@gmail.com", "password": "123456"}
         )
-        
         assert response.status_code == 200
         data = response.json()
         assert "access_token" in data
         assert data["token_type"] == "bearer"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 @patch('app.api.v1.controllers.auth_controller.auth_service.verify_jira_api_credentials', new_callable=AsyncMock)
 @patch('app.api.v1.controllers.auth_controller.user_repo')

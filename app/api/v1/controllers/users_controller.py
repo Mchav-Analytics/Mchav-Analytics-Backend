@@ -21,7 +21,9 @@ class UserStatusPayload(BaseModel):
     activo: bool
 
 class UserRolePayload(BaseModel):
-    id_rol: int
+    id_rol: Optional[int] = None
+    role: Optional[str] = None
+    nombre_rol: Optional[str] = None
 
 class UserProjectsPayload(BaseModel):
     id_proyectos: List[str]
@@ -149,7 +151,19 @@ async def update_user_role(
     if not target_user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-    role = db.query(Role).filter(Role.id_rol == payload.id_rol).first()
+    role = None
+    if payload.id_rol:
+        role = db.query(Role).filter(Role.id_rol == payload.id_rol).first()
+
+    raw_role_str = (payload.role or payload.nombre_rol or "").upper()
+    if not role and raw_role_str:
+        if "ADMIN" in raw_role_str:
+            role = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
+        elif "MANAG" in raw_role_str or "PLANIF" in raw_role_str or "LIDER" in raw_role_str:
+            role = db.query(Role).filter(Role.nombre_rol == "Planificador").first()
+        elif "DEV" in raw_role_str or "DESARR" in raw_role_str:
+            role = db.query(Role).filter(Role.nombre_rol == "Desarrollador").first()
+
     if not role:
         raise HTTPException(status_code=400, detail="El rol especificado no existe.")
 

@@ -178,8 +178,21 @@ def get_current_user(
         raise credentials_exception
 
     user = db.query(User).filter(User.id_usuario == user_id, User.activo.is_(True)).first()
-    if user is None or user.rol is None:
+    if user is None:
         raise credentials_exception
+
+    if user.rol is None:
+        from app.models.auth import Role
+        default_role = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
+        if not default_role:
+            default_role = db.query(Role).first()
+        if default_role:
+            user.id_rol = default_role.id_rol
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        else:
+            raise credentials_exception
 
     user_scopes = user.rol.scopes_list
     for scope in security_scopes.scopes:

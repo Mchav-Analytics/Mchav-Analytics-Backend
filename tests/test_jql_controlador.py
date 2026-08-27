@@ -2,7 +2,18 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 
+from app.core.security import get_current_user
+from app.models.auth import User, Role
+
 client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    mock_role = Role(nombre_rol="Administrador", scopes="jira:read,jira:sync,projects:write,admin")
+    mock_user = User(id_usuario=1, email="test@mchav.com", activo=True, rol=mock_role)
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 def test_obtener_jql_extraccion_delta():
     """Verifica que el endpoint de extracción delta devuelva el JQL parametrizado."""

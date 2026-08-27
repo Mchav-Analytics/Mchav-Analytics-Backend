@@ -220,14 +220,23 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str, usuario_nombre: str
     pdf.cell(0, 5, sanitize_text(f"PROYECTO: {proyecto_nombre.upper()}  |  ID JIRA: {proyecto_id}  |  FECHA EMISION: {now_str}"), 0, 1)
     pdf.ln(1)
 
-    # Resumen Ejecutivo Explícito
+    # Resumen Ejecutivo Explícito Impulsado por Gemini
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*SLATE_600)
-    resumen_txt = (
-        f"Este informe ejecutivo presenta el diagnostico consolidado de desempeno agil y productividad para el proyecto '{proyecto_nombre}'. "
-        "Las metricas evaluadas analizan la velocidad de entregas (Story Points), la frecuencia de resolucion (Throughput) "
-        "y los tiempos de respuesta (Lead Time y Cycle Time) para identificar oportunidades de optimizacion y cuellos de botella operativos."
-    )
+    
+    try:
+        from app.services.gemini_service import generate_pdf_conclusions
+        avg_ct = sum([float(s.get("cycle_time_promedio_dias", 2.5)) for s in sprints_kpi_data]) / max(len(sprints_kpi_data), 1)
+        tot_tp = sum([int(s.get("throughput_issues", 0)) for s in sprints_kpi_data])
+        tot_sp = sum([float(s.get("velocity_total_sp", 0)) for s in sprints_kpi_data])
+        resumen_txt = generate_pdf_conclusions(proyecto_nombre, round(avg_ct, 1), tot_tp, round(tot_sp, 1))
+    except Exception:
+        resumen_txt = (
+            f"Este informe ejecutivo presenta el diagnostico consolidado de desempeno agil y productividad para el proyecto '{proyecto_nombre}'. "
+            "Las metricas evaluadas analizan la velocidad de entregas (Story Points), la frecuencia de resolucion (Throughput) "
+            "y los tiempos de respuesta (Lead Time y Cycle Time) para identificar oportunidades de optimizacion y cuellos de botella operativos."
+        )
+
     pdf.multi_cell(0, 4, sanitize_text(resumen_txt))
     pdf.ln(3)
 

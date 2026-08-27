@@ -19,7 +19,7 @@ class Role(Base):
     # Ejemplo: "jira:read,jira:sync,projects:write"
     # String simple en vez de ARRAY para que funcione igual en Postgres y SQLite.
     scopes = Column(String(500), nullable=False, default="")
-    # Nombre del rol (ejemplo: 'Administrador', 'Analista', 'Líder de Proyecto')
+    # Nombre del rol (ejemplo: 'Administrador', 'Analista', 'Planificador')
     nombre_rol = Column(String(50), unique=True, nullable=False)
 
     # Relación uno-a-muchos con el modelo User

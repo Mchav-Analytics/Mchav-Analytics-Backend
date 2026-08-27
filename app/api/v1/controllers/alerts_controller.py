@@ -56,7 +56,7 @@ async def list_help_requests(
 ):
     """
     GET /api/v1/alerts/help-requests
-    Obtiene el listado de solicitudes de ayuda y escalamiento enviadas por desarrolladores o líderes técnicos.
+    Obtiene el listado de solicitudes de ayuda y escalamiento enviadas por desarrolladores o planificadores.
     """
     try:
         return get_help_requests(db, proyecto_id)
@@ -72,7 +72,7 @@ async def submit_help_request(
 ):
     """
     POST /api/v1/alerts/help-requests
-    Permite a desarrolladores o líderes técnicos enviar una solicitud de ayuda/escalamiento.
+    Permite a desarrolladores o planificadores enviar una solicitud de ayuda/escalamiento.
     """
     try:
         return create_help_request(db, payload)
