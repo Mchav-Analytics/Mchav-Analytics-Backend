@@ -17,20 +17,46 @@ from app.services.performance_score_engine import calculate_team_performance_mat
 
 router = APIRouter()
 
+from pydantic import BaseModel, Field
+
+class MatrixConfigPayload(BaseModel):
+    quality_threshold: float = Field(80.0, description="Umbral de calidad objetivo (50-95%)")
+    weight_throughput: float = Field(25.0, description="Ponderación Throughput (%)")
+    weight_velocity: float = Field(20.0, description="Ponderación Velocidad (%)")
+    weight_cycletime: float = Field(20.0, description="Ponderación Cycle Time (%)")
+    weight_commitment: float = Field(20.0, description="Ponderación Commitment (%)")
+    weight_quality: float = Field(15.0, description="Ponderación Calidad (%)")
+    nombre_modelo: str = Field("Modelo Personalizado", description="Nombre del perfil de desempeño")
+
 @router.get("/matrix")
 def get_team_performance_matrix(
     proyecto_id: str = Query("PROJ-01", description="ID del proyecto"),
     sprint_id: str = Query(None, description="ID del sprint opcional"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    quality_threshold: float = Query(None, description="Umbral de calidad dinámico (opcional)"),
+    w_tp: float = Query(None, description="Ponderación Throughput"),
+    w_sp: float = Query(None, description="Ponderación Velocity"),
+    w_ct: float = Query(None, description="Ponderación Cycle Time"),
+    w_com: float = Query(None, description="Ponderación Commitment"),
+    w_qual: float = Query(None, description="Ponderación Calidad")
 ):
     """
     Obtiene la Matriz Comparativa de Equipo con el Performance Score (0-100 pts),
     cuadrantes operativos (Estrella, Metódico, Alto Volumen, Atascado) y explicaciones detalladas (Fase 6).
     """
+    weights = None
+    if any(x is not None for x in [w_tp, w_sp, w_ct, w_com, w_qual]):
+        weights = {
+            "w_tp": w_tp if w_tp is not None else 25.0,
+            "w_sp": w_sp if w_sp is not None else 20.0,
+            "w_ct": w_ct if w_ct is not None else 20.0,
+            "w_com": w_com if w_com is not None else 20.0,
+            "w_qual": w_qual if w_qual is not None else 15.0
+        }
     try:
-        return calculate_team_performance_matrix(db, proyecto_id, sprint_id)
+        return calculate_team_performance_matrix(db, proyecto_id, sprint_id, quality_threshold, weights)
     except Exception as e:
-        db.rollback()
+        if hasattr(db, 'rollback'): db.rollback()
         print("Error en get_team_performance_matrix:", e)
         return {
             "proyecto_id": proyecto_id,
@@ -46,6 +72,51 @@ def get_team_performance_matrix(
             },
             "developers": []
         }
+
+@router.post("/matrix/config")
+def save_matrix_config(
+    proyecto_id: str = Query("PROJ-01", description="ID del proyecto"),
+    payload: MatrixConfigPayload = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Guarda de forma permanente la configuración de umbrales y ponderaciones de la matriz para un proyecto.
+    """
+    if not payload:
+        payload = MatrixConfigPayload()
+
+    cfg = db.query(models.ConfiguracionMatriz).filter(models.ConfiguracionMatriz.id_proyecto == proyecto_id).first()
+    if not cfg:
+        cfg = models.ConfiguracionMatriz(id_proyecto=proyecto_id)
+        db.add(cfg)
+
+    cfg.quality_threshold = payload.quality_threshold
+    cfg.weight_throughput = payload.weight_throughput
+    cfg.weight_velocity = payload.weight_velocity
+    cfg.weight_cycletime = payload.weight_cycletime
+    cfg.weight_commitment = payload.weight_commitment
+    cfg.weight_quality = payload.weight_quality
+    cfg.nombre_modelo = payload.nombre_modelo
+
+    db.commit()
+    db.refresh(cfg)
+    return {
+        "status": "success",
+        "message": "Configuración de la Matriz guardada permanentemente con éxito",
+        "config": {
+            "proyecto_id": proyecto_id,
+            "quality_threshold": float(cfg.quality_threshold),
+            "weights": {
+                "w_tp": float(cfg.weight_throughput),
+                "w_sp": float(cfg.weight_velocity),
+                "w_ct": float(cfg.weight_cycletime),
+                "w_com": float(cfg.weight_commitment),
+                "w_qual": float(cfg.weight_quality)
+            },
+            "nombre_modelo": cfg.nombre_modelo
+        }
+    }
+
 
 
 @router.get("/me/scorecard")

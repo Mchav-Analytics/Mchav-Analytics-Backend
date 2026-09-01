@@ -92,3 +92,24 @@ class KpisSprintSalud(Base):
     diagnostico = Column(String(50), default="EXCELENTE")
 
 
+class ConfiguracionMatriz(Base):
+    """
+    Modelo ORM para almacenar la configuración de la Matriz de Rendimiento por Proyecto.
+    Tabla: 'configuracion_matriz'
+    Almacena el umbral de calidad y las ponderaciones del Performance Score.
+    """
+    __tablename__ = "configuracion_matriz"
+
+    id_config = Column(Integer, primary_key=True, autoincrement=True)
+    id_proyecto = Column(String(50), ForeignKey("proyectos.id_proyecto", ondelete="CASCADE"), nullable=False, unique=True)
+    quality_threshold = Column(Numeric(5, 2), default=80.00)  # Umbral de Calidad (50 - 95%)
+    weight_throughput = Column(Numeric(5, 2), default=25.00)   # Ponderación Throughput (%)
+    weight_velocity = Column(Numeric(5, 2), default=20.00)     # Ponderación Velocidad (%)
+    weight_cycletime = Column(Numeric(5, 2), default=20.00)    # Ponderación Cycle Time (%)
+    weight_commitment = Column(Numeric(5, 2), default=20.00)   # Ponderación Commitment (%)
+    weight_quality = Column(Numeric(5, 2), default=15.00)      # Ponderación Calidad (%)
+    nombre_modelo = Column(String(100), default="Modelo Estándar MCHAV")
+    fecha_actualizacion = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+
