@@ -12,7 +12,9 @@ from app.api.v1.controllers.projects_controller import (
     get_project_mappings,
     save_project_mappings,
     get_project_percentiles,
-    get_burndown_chart
+    get_burndown_chart,
+    get_burnup_chart,
+    get_cfd_chart
 )
 import app.models as models
 
@@ -169,3 +171,15 @@ async def test_get_project_percentiles_and_burndown():
     with patch("app.api.v1.controllers.projects_controller.calculate_burndown_chart_data", return_value=[{"dia": 1}]):
         bd = await get_burndown_chart("P1", "S1", mock_db)
         assert bd["data"] == [{"dia": 1}]
+
+@pytest.mark.asyncio
+async def test_get_burnup_and_cfd_charts():
+    mock_db = MagicMock()
+    with patch("app.api.v1.controllers.projects_controller.calculate_burnup_chart_data", return_value=[{"dia": 1}]):
+        bu = await get_burnup_chart("P1", "S1", mock_db)
+        assert bu["data"] == [{"dia": 1}]
+
+    with patch("app.api.v1.controllers.projects_controller.calculate_cfd_chart_data", return_value=[{"dia": 1}]):
+        cfd = await get_cfd_chart("P1", "S1", mock_db)
+        assert cfd["data"] == [{"dia": 1}]
+
