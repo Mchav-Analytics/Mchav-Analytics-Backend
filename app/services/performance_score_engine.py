@@ -306,6 +306,59 @@ def calculate_team_performance_matrix(
         else:
             explicacion_razones.append(f"Índice de calidad ({desglose['quality_score']}%) por debajo del umbral objetivo de {active_quality_threshold}%.")
 
+        # Generar análisis enriquecido Nubi IA personalizado para el desarrollador
+        fortalezas = []
+        oportunidades = []
+
+        if tickets_done >= team_avg_tickets:
+            fortalezas.append(f"Alta capacidad de entrega con {tickets_done} tickets cerrados (promedio del equipo: {team_avg_tickets}).")
+        else:
+            oportunidades.append(f"El volumen de entregas ({tickets_done} tickets) está por debajo del promedio del equipo ({team_avg_tickets}).")
+
+        if sp_done > team_avg_sp:
+            fortalezas.append(f"Liderazgo en esfuerzo técnico abordando {sp_done} Story Points en el período.")
+
+        if cycle_time > 0 and cycle_time <= team_avg_cycle_time:
+            fortalezas.append(f"Flujo de trabajo ágil con un Cycle Time de {cycle_time} días por tarea (promedio del equipo: {team_avg_cycle_time}d).")
+        elif cycle_time > team_avg_cycle_time:
+            oportunidades.append(f"Tiempo de desarrollo extenso ({cycle_time}d vs promedio {team_avg_cycle_time}d), lo que sugiere cuellos de botella en testing o Code Review.")
+
+        if desglose["quality_score"] >= active_quality_threshold:
+            fortalezas.append(f"Código limpio y de alta calidad ({desglose['quality_score']}%), superando el umbral objetivo del {active_quality_threshold}%.")
+        else:
+            oportunidades.append(f"Índice de calidad ({desglose['quality_score']}%) afectado por re-aperturas de QA ({bugs_reopened} incidencias con observaciones).")
+
+        if commitment >= 85:
+            fortalezas.append(f"Excelente nivel de cumplimiento de compromisos del sprint ({commitment}%).")
+        else:
+            oportunidades.append(f"Cumplimiento de sprint del {commitment}%, se recomienda ajustar el sizing inicial en Planning.")
+
+        if wip_actual > 3:
+            oportunidades.append(f"WIP elevado ({wip_actual} tareas simultáneas), lo que dispersa la atención y aumenta el Cycle Time.")
+
+        # Resumen narrativo Nubi IA personalizado
+        dev_name_display = m["nombre"]
+        if quadrant["codigo"] == "ESTRELLA":
+            resumen_ejecutivo = f"Nubi IA identifica a {dev_name_display} como un pilar fundamental del equipo (Top Performer). Combina entregas rápidas con excelente solidez técnica sin devoluciones de QA."
+            recomendacion_lider = f"Promover a {dev_name_display} para liderar revisiones de arquitectura y mentoría entre pares."
+        elif quadrant["codigo"] == "METODICO":
+            resumen_ejecutivo = f"Nubi IA destaca a {dev_name_display} por su alta precisión y minuciosidad en el código. Prioriza la calidad estricta, lo que garantiza entregables sin errores a QA."
+            recomendacion_lider = f"Apoyar a {dev_name_display} descomponiendo historias de usuario grandes para acelerar el ritmo de entrega sin perder calidad."
+        elif quadrant["codigo"] == "ALTO_VOLUMEN":
+            resumen_ejecutivo = f"Nubi IA observa en {dev_name_display} un motor de producción constante y alto volumen, aunque algunas entregas presentan observaciones en revisión de QA."
+            recomendacion_lider = f"Fomentar la realización de pruebas unitarias locales y Code Review entre pares antes de mover tareas a QA."
+        else:
+            resumen_ejecutivo = f"Nubi IA detecta que {dev_name_display} enfrenta bloqueos o cuellos de botella técnicos que están extendiendo su tiempo de ciclo y afectando su índice de calidad."
+            recomendacion_lider = f"Establecer sesiones de Pair Programming de 30 minutos y revisar dependencias bloqueantes en la Daily Standup."
+
+        analisis_ia = {
+            "resumen_ejecutivo": resumen_ejecutivo,
+            "fortalezas": fortalezas,
+            "oportunidades": oportunidades,
+            "recomendacion_lider": recomendacion_lider,
+            "diagnostico_cuadrante": quadrant["descripcion"]
+        }
+
         matrix_developers.append({
             "assignee_id": m["assignee_id"],
             "nombre": m["nombre"],
@@ -320,6 +373,7 @@ def calculate_team_performance_matrix(
             "desglose_score": desglose,
             "cuadrante": quadrant,
             "explicacion_razones": explicacion_razones,
+            "analisis_ia": analisis_ia,
             "scorecard_completo": sc
         })
 
