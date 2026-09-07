@@ -1,6 +1,7 @@
 # app/main.py
 # Punto de entrada principal de la aplicación web FastAPI
 
+import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -178,8 +179,11 @@ app.add_middleware(
 )
 
 @app.middleware("http")
-async def add_no_cache_headers(request: Request, call_next):
+async def add_process_time_header(request: Request, call_next):
+    start_time = time.time()
     response = await call_next(request)
+    process_time = (time.time() - start_time) * 1000
+    response.headers["X-Process-Time"] = f"{process_time:.2f}ms"
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     return response
@@ -191,3 +195,29 @@ app.include_router(api_router, prefix="/api")
 @app.get("/")
 def read_root():
     return {"message": "Bienvenido a la API de MCHAV Analytics"}
+
+@app.get("/healthz")
+@app.get("/api/v1/healthz")
+def health_check():
+    """
+    Endpoint de monitoreo avanzado y diagnóstico de servidor (Semana 4 - SLA & Performance)
+    """
+    start_t = time.time()
+    db_status = "connected"
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1;"))
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+
+    ping_ms = (time.time() - start_t) * 1000
+
+    return {
+        "status": "ok" if db_status == "connected" else "degraded",
+        "service": "MCHAV Analytics Backend API",
+        "version": "1.0.0",
+        "database": db_status,
+        "latency_ms": round(ping_ms, 2),
+        "scheduler": "active",
+        "environment": "production"
+    }

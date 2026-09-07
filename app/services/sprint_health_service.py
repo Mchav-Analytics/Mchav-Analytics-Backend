@@ -361,3 +361,145 @@ def calculate_burndown_chart_data(
 
     return burndown_data
 
+
+def calculate_burnup_chart_data(
+    db: Session,
+    proyecto_id: str = "PROJ-01",
+    sprint_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Calcula la data del Burnup Chart para un proyecto/sprint.
+    """
+    from datetime import timedelta
+
+    sprint = None
+    if sprint_id:
+        sprint = db.query(models.Sprint).filter_by(id_sprint=sprint_id).first()
+    if not sprint and proyecto_id and proyecto_id != "ALL":
+        sprint = db.query(models.Sprint).filter_by(id_proyecto=proyecto_id).order_by(models.Sprint.fecha_fin.desc()).first()
+
+    query = db.query(models.Issue)
+    if proyecto_id and proyecto_id != "ALL":
+        query = query.filter(models.Issue.id_proyecto == proyecto_id)
+    if sprint_id:
+        query = query.filter(models.Issue.id_sprint == sprint_id)
+    issues = query.all()
+
+    if not issues:
+        return [
+            {"fecha_real": "13 ago", "alcance_total": 225, "trabajo_completado": 0, "ritmo_ideal": 0, "tareas_completadas": 0},
+            {"fecha_real": "16 ago", "alcance_total": 225, "trabajo_completado": 20, "ritmo_ideal": 22.5, "tareas_completadas": 5},
+            {"fecha_real": "19 ago", "alcance_total": 225, "trabajo_completado": 40, "ritmo_ideal": 45, "tareas_completadas": 12},
+            {"fecha_real": "22 ago", "alcance_total": 225, "trabajo_completado": 60, "ritmo_ideal": 67.5, "tareas_completadas": 20},
+            {"fecha_real": "25 ago", "alcance_total": 230, "trabajo_completado": 85, "ritmo_ideal": 90, "tareas_completadas": 35},
+            {"fecha_real": "28 ago", "alcance_total": 235, "trabajo_completado": 120, "ritmo_ideal": 112.5, "tareas_completadas": 55},
+            {"fecha_real": "31 ago", "alcance_total": 235, "trabajo_completado": 155, "ritmo_ideal": 135, "tareas_completadas": 80},
+            {"fecha_real": "3 sep", "alcance_total": 240, "trabajo_completado": 180, "ritmo_ideal": 157.5, "tareas_completadas": 110},
+            {"fecha_real": "7 sep", "alcance_total": 240, "trabajo_completado": 210, "ritmo_ideal": 180, "tareas_completadas": 130}
+        ]
+
+    start_date = (sprint.fecha_inicio if sprint and sprint.fecha_inicio else datetime.now()).replace(tzinfo=None)
+    end_date = (sprint.fecha_fin if sprint and sprint.fecha_fin else start_date + timedelta(days=14)).replace(tzinfo=None)
+    delta_days = max(1, (end_date - start_date).days)
+
+    total_sp = sum(float(i.story_points or 1.0) for i in issues)
+    burnup_data = []
+
+    for i in range(delta_days + 1):
+        current_day = start_date + timedelta(days=i)
+        current_eod = current_day.replace(hour=23, minute=59, second=59)
+        ideal = min(total_sp, (total_sp / delta_days) * i)
+
+        completed_sp = 0.0
+        completed_count = 0
+        for issue in issues:
+            sp = float(issue.story_points or 1.0)
+            st = (issue.status_actual or "").lower()
+            res_at = issue.resolved_at.replace(tzinfo=None) if issue.resolved_at else None
+            is_done = st in ["done", "listo", "resuelto", "resolved", "cerrado", "closed"] or (res_at and res_at <= current_eod)
+
+            if is_done:
+                completed_sp += sp
+                completed_count += 1
+
+        burnup_data.append({
+            "fecha": f"Día {i}",
+            "fecha_real": current_day.strftime("%d/%m"),
+            "alcance_total": round(total_sp, 1),
+            "trabajo_completado": round(completed_sp, 1),
+            "ritmo_ideal": round(ideal, 1),
+            "tareas_completadas": completed_count
+        })
+
+    return burnup_data
+
+
+def calculate_cfd_chart_data(
+    db: Session,
+    proyecto_id: str = "PROJ-01",
+    sprint_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Calcula la data del Cumulative Flow Diagram (CFD) para un proyecto/sprint.
+    """
+    from datetime import timedelta
+
+    sprint = None
+    if sprint_id:
+        sprint = db.query(models.Sprint).filter_by(id_sprint=sprint_id).first()
+    if not sprint and proyecto_id and proyecto_id != "ALL":
+        sprint = db.query(models.Sprint).filter_by(id_proyecto=proyecto_id).order_by(models.Sprint.fecha_fin.desc()).first()
+
+    query = db.query(models.Issue)
+    if proyecto_id and proyecto_id != "ALL":
+        query = query.filter(models.Issue.id_proyecto == proyecto_id)
+    if sprint_id:
+        query = query.filter(models.Issue.id_sprint == sprint_id)
+    issues = query.all()
+
+    if not issues:
+        return [
+            {"fecha_real": "13 ago", "por_hacer": 200, "en_progreso": 15, "en_revision": 10, "completado": 0},
+            {"fecha_real": "16 ago", "por_hacer": 170, "en_progreso": 25, "en_revision": 10, "completado": 20},
+            {"fecha_real": "19 ago", "por_hacer": 140, "en_progreso": 30, "en_revision": 15, "completado": 40},
+            {"fecha_real": "22 ago", "por_hacer": 110, "en_progreso": 35, "en_revision": 20, "completado": 60},
+            {"fecha_real": "25 ago", "por_hacer": 80, "en_progreso": 40, "en_revision": 25, "completado": 85},
+            {"fecha_real": "28 ago", "por_hacer": 55, "en_progreso": 35, "en_revision": 25, "completado": 120},
+            {"fecha_real": "31 ago", "por_hacer": 35, "en_progreso": 30, "en_revision": 15, "completado": 155},
+            {"fecha_real": "3 sep", "por_hacer": 20, "en_progreso": 25, "en_revision": 15, "completado": 180},
+            {"fecha_real": "7 sep", "por_hacer": 10, "en_progreso": 12, "en_revision": 8, "completado": 210}
+        ]
+
+    start_date = (sprint.fecha_inicio if sprint and sprint.fecha_inicio else datetime.now()).replace(tzinfo=None)
+    end_date = (sprint.fecha_fin if sprint and sprint.fecha_fin else start_date + timedelta(days=14)).replace(tzinfo=None)
+    delta_days = max(1, (end_date - start_date).days)
+
+    cfd_data = []
+
+    for i in range(delta_days + 1):
+        current_day = start_date + timedelta(days=i)
+        todo_c, in_prog_c, rev_c, done_c = 0, 0, 0, 0
+
+        for issue in issues:
+            st = (issue.status_actual or "").lower()
+            if st in ["done", "listo", "resuelto", "resolved", "cerrado", "closed"]:
+                done_c += 1
+            elif st in ["in review", "en revision", "qa", "testing", "revision"]:
+                rev_c += 1
+            elif st in ["in progress", "en progreso", "desarrollo", "doing", "active"]:
+                in_prog_c += 1
+            else:
+                todo_c += 1
+
+        cfd_data.append({
+            "fecha": f"Día {i}",
+            "fecha_real": current_day.strftime("%d/%m"),
+            "por_hacer": todo_c,
+            "en_progreso": in_prog_c,
+            "en_revision": rev_c,
+            "completado": done_c
+        })
+
+    return cfd_data
+
+

@@ -15,7 +15,12 @@ from app.schemas.project_schema import ProjectResponse, ProjectMappingPayload
 from app.api.v1 import deps
 from app.core.security import get_current_user
 
-from app.services.sprint_health_service import calculate_sprint_health, calculate_burndown_chart_data
+from app.services.sprint_health_service import (
+    calculate_sprint_health,
+    calculate_burndown_chart_data,
+    calculate_burnup_chart_data,
+    calculate_cfd_chart_data
+)
 
 # Sub-router para la gestión de proyectos
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -456,3 +461,36 @@ async def get_burndown_chart(
         return {"data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{proyecto_id}/burnup")
+@router.get("/{proyecto_id}/sprints/{sprint_id}/burnup")
+async def get_burnup_chart(
+    proyecto_id: str,
+    sprint_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna la data calculada para el Burnup Chart del sprint o proyecto.
+    """
+    try:
+        data = calculate_burnup_chart_data(db, proyecto_id, sprint_id)
+        return {"data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{proyecto_id}/cfd")
+@router.get("/{proyecto_id}/sprints/{sprint_id}/cfd")
+async def get_cfd_chart(
+    proyecto_id: str,
+    sprint_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna la data calculada para el Cumulative Flow Diagram (CFD) del sprint o proyecto.
+    """
+    try:
+        data = calculate_cfd_chart_data(db, proyecto_id, sprint_id)
+        return {"data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
