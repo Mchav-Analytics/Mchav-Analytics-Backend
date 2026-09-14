@@ -73,8 +73,8 @@ async def list_users(
     users = db.query(User).all()
     result = []
     for u in users:
-        rol_nombre = u.rol.nombre_rol if u.rol else "Sin Rol"
-        is_active = bool(u.activo and u.id_rol is not None)
+        rol_nombre = u.rol.nombre_rol if u.rol else "Desactivado"
+        is_active = bool(u.activo and (u.rol and u.rol.nombre_rol.lower() != "desactivado"))
 
         proj_ids = [p.id_proyecto for p in u.proyectos_asignados]
         result.append({
@@ -125,7 +125,23 @@ async def update_user_status(
     if not target_user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
+    rol_desactivado = db.query(Role).filter(Role.nombre_rol == "Desactivado").first()
+    if not rol_desactivado:
+        rol_desactivado = Role(nombre_rol="Desactivado", scopes="")
+        db.add(rol_desactivado)
+        db.commit()
+        db.refresh(rol_desactivado)
+
     target_user.activo = payload.activo
+    if not payload.activo:
+        target_user.id_rol = rol_desactivado.id_rol
+    else:
+        # Si se activa y tenía rol Desactivado o nulo, asignar Desarrollador por defecto
+        if not target_user.id_rol or target_user.id_rol == rol_desactivado.id_rol:
+            rol_dev = db.query(Role).filter(Role.nombre_rol == "Desarrollador").first()
+            if rol_dev:
+                target_user.id_rol = rol_dev.id_rol
+
     db.commit()
     db.refresh(target_user)
 
@@ -160,7 +176,16 @@ async def update_user_role(
 
     raw_role_str = (payload.role or payload.nombre_rol or "").upper()
     if not role and raw_role_str:
-        if "ADMIN" in raw_role_str:
+        if "DESACTIV" in raw_role_str or "INACTIV" in raw_role_str:
+            role = db.query(Role).filter(
+                (Role.nombre_rol == "Desactivado") | (Role.nombre_rol.ilike("%desactiv%"))
+            ).first()
+            if not role:
+                role = Role(nombre_rol="Desactivado", scopes="")
+                db.add(role)
+                db.commit()
+                db.refresh(role)
+        elif "ADMIN" in raw_role_str:
             role = db.query(Role).filter(
                 (Role.nombre_rol == "Administrador") | (Role.nombre_rol.ilike("%admin%"))
             ).first()
@@ -198,6 +223,11 @@ async def update_user_role(
         raise HTTPException(status_code=400, detail="El rol especificado no existe.")
 
     target_user.id_rol = role.id_rol
+    if role.nombre_rol.lower() == "desactivado":
+        target_user.activo = False
+    else:
+        target_user.activo = True
+
     db.commit()
     db.refresh(target_user)
 
@@ -206,7 +236,8 @@ async def update_user_role(
         "message": f"Rol '{role.nombre_rol}' asignado con éxito a {target_user.email}.",
         "id_usuario": target_user.id_usuario,
         "id_rol": role.id_rol,
-        "rol": role.nombre_rol
+        "rol": role.nombre_rol,
+        "activo": target_user.activo
     }
 
 @router.get(

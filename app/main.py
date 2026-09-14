@@ -91,13 +91,17 @@ def startup_event():
         roles_default = [
             {"nombre_rol": "Administrador", "scopes": "jira:read,jira:sync,projects:write,admin"},
             {"nombre_rol": "Planificador", "scopes": "jira:read,jira:sync,projects:write"},
-            {"nombre_rol": "Desarrollador", "scopes": "jira:read"}
+            {"nombre_rol": "Desarrollador", "scopes": "jira:read"},
+            {"nombre_rol": "Desactivado", "scopes": ""}
         ]
         for r_info in roles_default:
             r_exist = db.query(models.Role).filter(models.Role.nombre_rol == r_info["nombre_rol"]).first()
             if not r_exist:
                 db.add(models.Role(nombre_rol=r_info["nombre_rol"], scopes=r_info["scopes"]))
         db.commit()
+
+        rol_desactivado = db.query(models.Role).filter(models.Role.nombre_rol == "Desactivado").first()
+        admin_role = db.query(models.Role).filter(models.Role.nombre_rol == "Administrador").first()
 
         # Seeding de los 5 usuarios principales del sistema con sus roles respectivos
         from app.core.security import hash_password
@@ -127,23 +131,27 @@ def startup_event():
                 u_exist.activo = True
         db.commit()
 
-        # Limpiar cuentas ficticias y cuentas de prueba para que inicien flujo de aprobación limpio
-        db.query(models.User).filter(
-            (models.User.nombre == "Usuario") |
-            (models.User.email.in_(["dev@mchav.com", "vhoyos@mchav.com", "cgomez@mchav.com", "aftorres@mchav.com", "valemontalvo10@gmail.com", "valentina1025m@gmail.com"]))
-        ).delete(synchronize_session=False)
-        db.commit()
-
-        # REGLA ESTRICTA: Ningún usuario distinto a salamancamai12@gmail.com puede ser Administrador
-        admin_role = db.query(models.Role).filter(models.Role.nombre_rol == "Administrador").first()
-        if admin_role:
-            non_master_admins = db.query(models.User).filter(
+        # REGLA ESTRICTA: Ningún usuario distinto a salamancamai12@gmail.com puede ser Administrador por defecto
+        # Cualquier usuario no-master que esté inactivo, sin rol, o erróneamente en Administrador se asigna al rol Desactivado
+        if rol_desactivado:
+            # Usuarios sin rol o inactivos pasan al rol Desactivado
+            unassigned_users = db.query(models.User).filter(
                 models.User.email != "salamancamai12@gmail.com",
-                models.User.id_rol == admin_role.id_rol
+                (models.User.id_rol.is_(None)) | (models.User.activo.is_(False))
             ).all()
-            for bad_admin in non_master_admins:
-                bad_admin.id_rol = None
-                bad_admin.activo = False
+            for u in unassigned_users:
+                u.id_rol = rol_desactivado.id_rol
+                u.activo = False
+
+            # No-master administradores indebidos pasan a Desactivado
+            if admin_role:
+                bad_admins = db.query(models.User).filter(
+                    models.User.email != "salamancamai12@gmail.com",
+                    models.User.id_rol == admin_role.id_rol
+                ).all()
+                for bad_admin in bad_admins:
+                    bad_admin.id_rol = rol_desactivado.id_rol
+                    bad_admin.activo = False
             db.commit()
 
         stuck_logs = db.query(LogsSincronizacion).filter(LogsSincronizacion.resultado == "RUNNING").all()

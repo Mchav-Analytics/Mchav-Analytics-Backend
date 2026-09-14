@@ -43,7 +43,8 @@ def get_current_user_flexible(
 async def get_current_user_info(
     current_user: User = Depends(get_current_user_flexible)
 ):
-    rol_nombre = current_user.rol.nombre_rol if current_user.rol else None
+    rol_nombre = current_user.rol.nombre_rol if current_user.rol else "Desactivado"
+    is_active = bool(current_user.activo and (current_user.rol and current_user.rol.nombre_rol.lower() != "desactivado"))
     
     return {
         "id_usuario": current_user.id_usuario,
@@ -51,7 +52,7 @@ async def get_current_user_info(
         "nombre": current_user.nombre,
         "id_rol": current_user.id_rol,
         "rol": rol_nombre,
-        "activo": current_user.activo,
+        "activo": is_active,
         "jira_account_id": current_user.jira_account_id,
         "cloud_id": current_user.cloud_id,
         "jira_domain": current_user.jira_domain,
@@ -145,23 +146,33 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
 
     is_master_admin = (email.lower() == "salamancamai12@gmail.com")
     rol_admin = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
-    rol_dev = db.query(Role).filter(Role.nombre_rol == "Desarrollador").first()
+    rol_desactivado = db.query(Role).filter(Role.nombre_rol == "Desactivado").first()
+    if not rol_desactivado:
+        rol_desactivado = Role(nombre_rol="Desactivado", scopes="")
+        db.add(rol_desactivado)
+        db.commit()
+        db.refresh(rol_desactivado)
 
     if not user:
         if is_master_admin:
             u_data["id_rol"] = rol_admin.id_rol if rol_admin else 1
             u_data["activo"] = True
         else:
-            u_data["id_rol"] = None
+            u_data["id_rol"] = rol_desactivado.id_rol
             u_data["activo"] = False
         user = user_repo.create(db, obj_in=u_data)
-        print(f"[OAuth Callback] Nuevo usuario creado: {user.email} (ID: {user.id_usuario}, Activo: {user.activo})")
+        print(f"[OAuth Callback] Nuevo usuario creado con rol Desactivado: {user.email} (ID: {user.id_usuario}, Activo: {user.activo})")
     else:
         if is_master_admin:
             u_data["id_rol"] = rol_admin.id_rol if rol_admin else 1
             u_data["activo"] = True
+        else:
+            # Si el usuario existente no tiene rol, o está inactivo, o su rol es Desactivado, mantener Desactivado
+            if not user.id_rol or not user.activo or (user.rol and user.rol.nombre_rol.lower() == "desactivado"):
+                u_data["id_rol"] = rol_desactivado.id_rol
+                u_data["activo"] = False
         user = user_repo.update(db, db_obj=user, obj_in=u_data)
-        print(f"[OAuth Callback] Usuario existente actualizado y vinculado: {user.email} (ID: {user.id_usuario}, Activo: {user.activo})")
+        print(f"[OAuth Callback] Usuario existente actualizado: {user.email} (ID: {user.id_usuario}, Activo: {user.activo})")
 
     signed_session = sign_session_id(user.id_usuario)
 
@@ -197,6 +208,12 @@ async def post_login_local(
     user = db.query(User).filter(User.email == payload.email).first()
     is_master = (payload.email.lower().strip() == "salamancamai12@gmail.com")
     rol_admin = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
+    rol_desactivado = db.query(Role).filter(Role.nombre_rol == "Desactivado").first()
+    if not rol_desactivado:
+        rol_desactivado = Role(nombre_rol="Desactivado", scopes="")
+        db.add(rol_desactivado)
+        db.commit()
+        db.refresh(rol_desactivado)
 
     if not user:
         if is_master:
@@ -211,7 +228,7 @@ async def post_login_local(
                 email=payload.email,
                 nombre=payload.email.split("@")[0].replace(".", " ").title(),
                 activo=False,
-                id_rol=None
+                id_rol=rol_desactivado.id_rol
             )
         db.add(user)
         db.commit()
@@ -230,14 +247,15 @@ async def post_login_local(
         path="/"
     )
 
-    rol_nombre = user.rol.nombre_rol if user.rol else None
+    rol_nombre = user.rol.nombre_rol if user.rol else "Desactivado"
+    is_active = bool(user.activo and (user.rol and user.rol.nombre_rol.lower() != "desactivado"))
     return {
         "id_usuario": user.id_usuario,
         "email": user.email,
         "nombre": user.nombre,
         "id_rol": user.id_rol,
         "rol": rol_nombre,
-        "activo": user.activo,
+        "activo": is_active,
         "token": signed_session,
         "access_token": signed_session,
         "jira_account_id": user.jira_account_id,
