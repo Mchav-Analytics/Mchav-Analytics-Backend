@@ -109,54 +109,6 @@ async def save_jira_credentials(
         "message": "Credenciales de API Token de Jira vinculadas y verificadas con éxito."
     }
 
-from pydantic import BaseModel
-
-class MockLoginPayload(BaseModel):
-    email: str
-    role: str = None
-
-@router.post(
-    "/login",
-    summary="Login de desarrollo",
-    description="Endpoint POST para iniciar sesión sin OAuth desde la UI de desarrollo."
-)
-async def login_post(payload: MockLoginPayload, response: Response, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == payload.email).first()
-    if not user:
-        # Crea el usuario si no existe (para entorno dev)
-        rol = db.query(Role).filter(Role.nombre_rol == ("Administrador" if payload.role == "ADMIN" else "Desarrollador")).first()
-        user = user_repo.create(db, obj_in={
-            "email": payload.email,
-            "nombre": payload.email.split("@")[0],
-            "id_rol": rol.id_rol if rol else 1,
-            "activo": True
-        })
-    
-    signed_session = sign_session_id(user.id_usuario)
-    response.set_cookie(
-        key="session_id",
-        value=signed_session,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        path="/"
-    )
-    rol_nombre = user.rol.nombre_rol if user.rol else None
-    return {
-        "id_usuario": user.id_usuario,
-        "email": user.email,
-        "nombre": user.nombre,
-        "id_rol": user.id_rol,
-        "rol": rol_nombre,
-        "activo": user.activo,
-        "token": signed_session,
-        "access_token": signed_session,
-        "jira_account_id": user.jira_account_id,
-        "cloud_id": user.cloud_id,
-        "jira_domain": user.jira_domain,
-        "jira_email": user.jira_email,
-        "api_token_vinculado": user.api_token_vinculado
-    }
 
 @router.get(
     "/login",
@@ -208,6 +160,12 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
         if is_master_admin:
             u_data["id_rol"] = rol_admin.id_rol if rol_admin else 1
             u_data["activo"] = True
+        else:
+            # REGLA ESTRICTA: Ningún usuario distinto a salamancamai12@gmail.com puede ser Administrador
+            admin_id = rol_admin.id_rol if rol_admin else 1
+            if user.id_rol == admin_id or (user.rol and user.rol.nombre_rol.lower() == "administrador"):
+                u_data["id_rol"] = None
+                u_data["activo"] = False
         user = user_repo.update(db, db_obj=user, obj_in=u_data)
         print(f"[OAuth Callback] Usuario existente actualizado y vinculado: {user.email} (ID: {user.id_usuario}, Activo: {user.activo})")
 
@@ -243,20 +201,33 @@ async def post_login_local(
     db: Session = Depends(get_db)
 ):
     user = db.query(User).filter(User.email == payload.email).first()
+    is_master = (payload.email.lower().strip() == "salamancamai12@gmail.com")
+    rol_admin = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
 
     if not user:
-        rol_name = "Administrador" if (payload.role and "ADMIN" in str(payload.role).upper()) or "vhoyos" in payload.email else "Desarrollador"
-        rol_obj = db.query(Role).filter(Role.nombre_rol == rol_name).first()
-
-        user = User(
-            email=payload.email,
-            nombre=payload.email.split("@")[0].replace(".", " ").title(),
-            activo=True,
-            id_rol=rol_obj.id_rol if rol_obj else 1
-        )
+        if is_master:
+            user = User(
+                email=payload.email,
+                nombre=payload.email.split("@")[0].replace(".", " ").title(),
+                activo=True,
+                id_rol=rol_admin.id_rol if rol_admin else 1
+            )
+        else:
+            user = User(
+                email=payload.email,
+                nombre=payload.email.split("@")[0].replace(".", " ").title(),
+                activo=False,
+                id_rol=None
+            )
         db.add(user)
         db.commit()
         db.refresh(user)
+    else:
+        if not is_master and user.id_rol == (rol_admin.id_rol if rol_admin else 1):
+            user.id_rol = None
+            user.activo = False
+            db.commit()
+            db.refresh(user)
 
     signed_session = sign_session_id(user.id_usuario)
 
@@ -269,7 +240,7 @@ async def post_login_local(
         path="/"
     )
 
-    rol_nombre = user.rol.nombre_rol if user.rol else "Desarrollador"
+    rol_nombre = user.rol.nombre_rol if user.rol else None
     return {
         "id_usuario": user.id_usuario,
         "email": user.email,

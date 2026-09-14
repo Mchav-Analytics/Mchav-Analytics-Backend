@@ -6,14 +6,12 @@ from app.api.v1.controllers.auth_controller import (
     get_current_user_info,
     get_jira_credentials,
     save_jira_credentials,
-    login_post,
     login,
     callback,
     post_login_local,
     login_local,
     logout,
     JiraCredentialsPayload,
-    MockLoginPayload,
     LoginPayload
 )
 import app.models as models
@@ -61,14 +59,14 @@ async def test_login_post_and_local():
     mock_db = MagicMock()
     response = Response()
     
-    # 1. New user login_post
+    # 1. Non-master login
     mock_db.query.return_value.filter.return_value.first.return_value = None
-    with patch("app.repositories.user_repo.create", return_value=MagicMock(id_usuario=1, email="new@mchav.com", nombre="new", id_rol=1, activo=True, rol=MagicMock(nombre_rol="Admin"), jira_account_id=None, cloud_id=None, jira_domain=None, jira_email=None, api_token_vinculado=False)):
-        res1 = await login_post(MockLoginPayload(email="new@mchav.com", role="ADMIN"), response, mock_db)
-        assert res1["id_usuario"] == 1
+    res1 = await post_login_local(LoginPayload(email="new@mchav.com", role="ADMIN"), response, mock_db)
+    assert "token" in res1
+    assert res1["activo"] is False
 
     # 2. Local login
-    res2 = await post_login_local(LoginPayload(email="vhoyos@mchav.com", role="ADMIN"), response, mock_db)
+    res2 = await post_login_local(LoginPayload(email="salamancamai12@gmail.com", role="ADMIN"), response, mock_db)
     assert "token" in res2
 
 def test_login_and_logout():

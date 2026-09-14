@@ -190,18 +190,20 @@ def get_current_user(
 
     if user.rol is None:
         from app.models.auth import Role
-        default_role = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
-        if not default_role:
-            default_role = db.query(Role).first()
-        if default_role:
-            user.id_rol = default_role.id_rol
-            db.add(user)
-            db.commit()
-            db.refresh(user)
+        if user.email and user.email.lower() == "salamancamai12@gmail.com":
+            admin_role = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
+            if admin_role:
+                user.id_rol = admin_role.id_rol
+                db.commit()
+                db.refresh(user)
         else:
-            raise credentials_exception
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Tu cuenta de usuario no tiene un rol asignado por el Administrador.",
+                headers={"WWW-Authenticate": authenticate_value},
+            )
 
-    user_scopes = user.rol.scopes_list
+    user_scopes = user.rol.scopes_list if user.rol else []
     for scope in security_scopes.scopes:
         if scope not in user_scopes:
             raise HTTPException(

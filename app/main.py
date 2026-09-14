@@ -134,6 +134,18 @@ def startup_event():
         ).delete(synchronize_session=False)
         db.commit()
 
+        # REGLA ESTRICTA: Ningún usuario distinto a salamancamai12@gmail.com puede ser Administrador
+        admin_role = db.query(models.Role).filter(models.Role.nombre_rol == "Administrador").first()
+        if admin_role:
+            non_master_admins = db.query(models.User).filter(
+                models.User.email != "salamancamai12@gmail.com",
+                models.User.id_rol == admin_role.id_rol
+            ).all()
+            for bad_admin in non_master_admins:
+                bad_admin.id_rol = None
+                bad_admin.activo = False
+            db.commit()
+
         stuck_logs = db.query(LogsSincronizacion).filter(LogsSincronizacion.resultado == "RUNNING").all()
         for log in stuck_logs:
             log.resultado = "ERROR"
