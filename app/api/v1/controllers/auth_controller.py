@@ -191,7 +191,7 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
     if not user and email:
         user = user_repo.get_by_email(db, email)
 
-    is_master_admin = (email.lower() in ["salamancamai12@gmail.com", "valentina1025m@gmail.com"])
+    is_master_admin = (email.lower() == "salamancamai12@gmail.com")
     rol_admin = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
     rol_dev = db.query(Role).filter(Role.nombre_rol == "Desarrollador").first()
 

@@ -105,10 +105,6 @@ def startup_event():
 
         users_seed = [
             {"email": "salamancamai12@gmail.com", "nombre": "Michael Salamanca", "rol": "Administrador"},
-            {"email": "valentina1025m@gmail.com", "nombre": "Valentina Martínez", "rol": "Administrador"},
-            {"email": "corredorbeltran592@gmail.com", "nombre": "Camilo Corredor", "rol": "Planificador"},
-            {"email": "pipealcala22@gmail.com", "nombre": "Felipe Alcalá", "rol": "Administrador"},
-            {"email": "stephanyleon326@gmail.com", "nombre": "Stephany León", "rol": "Desarrollador"},
         ]
 
         for u_info in users_seed:
@@ -131,10 +127,10 @@ def startup_event():
                 u_exist.activo = True
         db.commit()
 
-        # Limpiar únicamente cuentas ficticias de prueba si existen
+        # Limpiar cuentas ficticias y cuentas de prueba para que inicien flujo de aprobación limpio
         db.query(models.User).filter(
             (models.User.nombre == "Usuario") |
-            (models.User.email.in_(["dev@mchav.com", "vhoyos@mchav.com", "cgomez@mchav.com", "aftorres@mchav.com"]))
+            (models.User.email.in_(["dev@mchav.com", "vhoyos@mchav.com", "cgomez@mchav.com", "aftorres@mchav.com", "valemontalvo10@gmail.com", "valentina1025m@gmail.com"]))
         ).delete(synchronize_session=False)
         db.commit()
 
