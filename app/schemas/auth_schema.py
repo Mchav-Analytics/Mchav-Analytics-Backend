@@ -14,7 +14,7 @@ class JiraCredentialsPayload(BaseModel):
 class UserResponse(BaseModel):
     """Esquema de respuesta seguro para devolver la información del perfil del usuario autenticado."""
     id_usuario: int
-    email: str
+    email: Optional[str] = None
     nombre: Optional[str] = None
     id_rol: Optional[int] = None
     rol: Optional[str] = None
