@@ -12,6 +12,10 @@ class CRUDUser(CRUDBase[User]):
         """Busca y retorna un usuario registrado mediante su identificador único de cuenta de Jira (accountId)."""
         return db.query(User).filter(User.jira_account_id == jira_account_id).first()
 
+    def get_by_email(self, db: Session, email: str):
+        """Busca y retorna un usuario registrado mediante su correo electrónico."""
+        return db.query(User).filter(User.email == email).first()
+
 class CRUDRole(CRUDBase[Role]):
     """Repositorio especializado para operaciones sobre la entidad Role."""
     pass
