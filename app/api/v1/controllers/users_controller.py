@@ -69,18 +69,44 @@ async def list_users(
     current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
     _verify_admin(current_user)
+
+    admin_role = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
+    admin_id = admin_role.id_rol if admin_role else 1
+
+    # AUTO-HEALING: Ningún usuario distinto a salamancamai12@gmail.com puede ser Administrador
+    bad_admins = db.query(User).filter(
+        User.email != "salamancamai12@gmail.com",
+        User.id_rol == admin_id
+    ).all()
+    if bad_admins:
+        for bad in bad_admins:
+            bad.id_rol = None
+            bad.activo = False
+        db.commit()
+
     users = db.query(User).all()
     result = []
     for u in users:
+        is_master = (u.email or "").lower().strip() == "salamancamai12@gmail.com"
+        
+        # Doble verificación en memoria
+        if not is_master and (u.id_rol == admin_id or (u.rol and u.rol.nombre_rol.lower() == "administrador")):
+            u.id_rol = None
+            u.activo = False
+            db.commit()
+            db.refresh(u)
+
+        rol_nombre = "Administrador" if is_master else (u.rol.nombre_rol if (u.rol and u.rol.nombre_rol != "Administrador") else "Sin Rol")
+        is_active = True if is_master else (u.activo and u.id_rol is not None)
+
         proj_ids = [p.id_proyecto for p in u.proyectos_asignados]
-        rol_nombre = u.rol.nombre_rol if u.rol else "Sin Rol"
         result.append({
             "id_usuario": u.id_usuario,
             "email": u.email,
             "nombre": u.nombre,
-            "id_rol": u.id_rol,
+            "id_rol": u.id_rol if (is_master or (u.rol and u.rol.nombre_rol != "Administrador")) else None,
             "rol": rol_nombre,
-            "activo": u.activo,
+            "activo": is_active,
             "proyectos_asignados": proj_ids
         })
     return result
@@ -156,6 +182,11 @@ async def update_user_role(
         role = db.query(Role).filter(Role.id_rol == payload.id_rol).first()
 
     raw_role_str = (payload.role or payload.nombre_rol or "").upper()
+    if (target_user.email or "").lower().strip() != "salamancamai12@gmail.com" and "ADMIN" in raw_role_str:
+        raise HTTPException(
+            status_code=400,
+            detail="El rol de Administrador es exclusivo de la cuenta maestra salamancamai12@gmail.com."
+        )
     if not role and raw_role_str:
         if "ADMIN" in raw_role_str:
             role = db.query(Role).filter(
