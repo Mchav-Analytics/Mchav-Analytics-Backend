@@ -165,16 +165,26 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
     
     u_data = await auth_service.exchange_code_for_user_profile(code)
     
-    user = user_repo.get_by_jira_account_id(db, u_data["jira_account_id"])
+    email = (u_data.get("email") or "").strip()
+    jira_account_id = u_data.get("jira_account_id")
+
+    user = None
+    if jira_account_id:
+        user = user_repo.get_by_jira_account_id(db, jira_account_id)
+    if not user and email:
+        user = user_repo.get_by_email(db, email)
+
     rol_default = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
     if not user:
         if rol_default:
             u_data["id_rol"] = rol_default.id_rol
         user = user_repo.create(db, obj_in=u_data)
+        print(f"[OAuth Callback] Nuevo usuario creado: {user.email} (ID: {user.id_usuario})")
     else:
         if not user.id_rol and rol_default:
             u_data["id_rol"] = rol_default.id_rol
         user = user_repo.update(db, db_obj=user, obj_in=u_data)
+        print(f"[OAuth Callback] Usuario existente actualizado y vinculado: {user.email} (ID: {user.id_usuario})")
 
     signed_session = sign_session_id(user.id_usuario)
 

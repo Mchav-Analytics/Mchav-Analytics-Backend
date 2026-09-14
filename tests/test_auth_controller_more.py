@@ -96,6 +96,7 @@ async def test_callback_oauth():
     with patch("app.services.auth_service.validate_oauth_state", return_value=True), \
          patch("app.services.auth_service.exchange_code_for_user_profile", new_callable=AsyncMock, return_value=u_profile), \
          patch("app.repositories.user_repo.get_by_jira_account_id", return_value=None), \
+         patch("app.repositories.user_repo.get_by_email", return_value=None), \
          patch("app.repositories.user_repo.create", return_value=MagicMock(id_usuario=99)):
         res_cb = await callback("code1", "good_state", response, mock_db)
         assert res_cb.status_code == 302
