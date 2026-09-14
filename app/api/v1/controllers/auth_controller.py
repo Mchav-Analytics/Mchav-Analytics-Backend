@@ -160,12 +160,6 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
         if is_master_admin:
             u_data["id_rol"] = rol_admin.id_rol if rol_admin else 1
             u_data["activo"] = True
-        else:
-            # REGLA ESTRICTA: Ningún usuario distinto a salamancamai12@gmail.com puede ser Administrador
-            admin_id = rol_admin.id_rol if rol_admin else 1
-            if user.id_rol == admin_id or (user.rol and user.rol.nombre_rol.lower() == "administrador"):
-                u_data["id_rol"] = None
-                u_data["activo"] = False
         user = user_repo.update(db, db_obj=user, obj_in=u_data)
         print(f"[OAuth Callback] Usuario existente actualizado y vinculado: {user.email} (ID: {user.id_usuario}, Activo: {user.activo})")
 
@@ -223,11 +217,7 @@ async def post_login_local(
         db.commit()
         db.refresh(user)
     else:
-        if not is_master and user.id_rol == (rol_admin.id_rol if rol_admin else 1):
-            user.id_rol = None
-            user.activo = False
-            db.commit()
-            db.refresh(user)
+        pass
 
     signed_session = sign_session_id(user.id_usuario)
 
