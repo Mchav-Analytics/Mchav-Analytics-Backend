@@ -139,32 +139,31 @@ async def callback(code: str, state: str, db: Session = Depends(get_db)):
     
     u_data = await auth_service.exchange_code_for_user_profile(code)
     
+    email = u_data.get("email")
+    jira_account_id = u_data.get("jira_account_id")
+
     user = None
-    if u_data.get("jira_account_id"):
-        user = user_repo.get_by_jira_account_id(db, u_data["jira_account_id"])
-    if not user and u_data.get("email"):
-        user = user_repo.get_by_email(db, u_data["email"])
+    if jira_account_id:
+        user = user_repo.get_by_jira_account_id(db, jira_account_id)
+    if not user and email:
+        from sqlalchemy import func
+        from app.models.auth import User
+        user = db.query(User).filter(func.lower(User.email) == func.lower(email.strip())).first()
 
     if not user:
-        try:
-            user = user_repo.create(db, obj_in=u_data)
-            print(f"[OAuth Callback] Nuevo usuario creado: id={user.id_usuario}, email={user.email}")
-        except Exception as err:
-            db.rollback()
-            print(f"[OAuth Callback] Error creando usuario, buscando por email fallback... ({err})")
-            existing = user_repo.get_by_email(db, u_data.get("email"))
-            if existing:
-                user = user_repo.update(db, db_obj=existing, obj_in=u_data)
-                print(f"[OAuth Callback] Usuario existente actualizado mediante fallback: id={user.id_usuario}, email={user.email}")
-            else:
-                raise err
+        user = user_repo.create(db, obj_in=u_data)
+        print(f"[OAuth Callback] Nuevo usuario creado: id={user.id_usuario}, email={user.email}")
     else:
-        user = user_repo.update(db, db_obj=user, obj_in=u_data)
+        for key, value in u_data.items():
+            if value is not None and hasattr(user, key):
+                setattr(user, key, value)
+        db.commit()
+        db.refresh(user)
         print(f"[OAuth Callback] Usuario existente actualizado: id={user.id_usuario}, email={user.email}")
         
     signed_session = sign_session_id(user.id_usuario)
 
-    # 1. Creamos la redirección hacia el frontend con token token como fallback
+    # 1. Creamos la redirección hacia el frontend con token como fallback
     redirect = RedirectResponse(url=f"{FRONTEND_URL}/dashboard?login=success&token={signed_session}", status_code=302)
     
     # 2. Inyectamos la cookie HTTP-Only en la respuesta de redirección
