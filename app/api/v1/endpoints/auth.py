@@ -139,14 +139,18 @@ async def callback(code: str, state: str, db: Session = Depends(get_db)):
     
     u_data = await auth_service.exchange_code_for_user_profile(code)
     
-    user = user_repo.get_by_jira_account_id(db, u_data["jira_account_id"])
+    user = None
+    if u_data.get("jira_account_id"):
+        user = user_repo.get_by_jira_account_id(db, u_data["jira_account_id"])
     if not user and u_data.get("email"):
         user = user_repo.get_by_email(db, u_data["email"])
 
     if not user:
         user = user_repo.create(db, obj_in=u_data)
+        print(f"[OAuth Callback] Nuevo usuario creado: id={user.id_usuario}, email={user.email}")
     else:
         user = user_repo.update(db, db_obj=user, obj_in=u_data)
+        print(f"[OAuth Callback] Usuario existente actualizado: id={user.id_usuario}, email={user.email}")
         
     signed_session = sign_session_id(user.id_usuario)
 
