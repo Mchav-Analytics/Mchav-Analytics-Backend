@@ -200,7 +200,7 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
             u_data["id_rol"] = rol_admin.id_rol if rol_admin else 1
             u_data["activo"] = True
         else:
-            u_data["id_rol"] = rol_dev.id_rol if rol_dev else 3
+            u_data["id_rol"] = None
             u_data["activo"] = False
         user = user_repo.create(db, obj_in=u_data)
         print(f"[OAuth Callback] Nuevo usuario creado: {user.email} (ID: {user.id_usuario}, Activo: {user.activo})")

@@ -177,9 +177,16 @@ def get_current_user(
     if user_id is None:
         raise credentials_exception
 
-    user = db.query(User).filter(User.id_usuario == user_id, User.activo.is_(True)).first()
+    user = db.query(User).filter(User.id_usuario == user_id).first()
     if user is None:
         raise credentials_exception
+
+    if not user.activo:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tu cuenta de usuario se encuentra inactiva o pendiente de aprobación por el Administrador.",
+            headers={"WWW-Authenticate": authenticate_value},
+        )
 
     if user.rol is None:
         from app.models.auth import Role

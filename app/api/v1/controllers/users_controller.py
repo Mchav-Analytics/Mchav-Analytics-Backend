@@ -158,11 +158,38 @@ async def update_user_role(
     raw_role_str = (payload.role or payload.nombre_rol or "").upper()
     if not role and raw_role_str:
         if "ADMIN" in raw_role_str:
-            role = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
-        elif "MANAG" in raw_role_str or "PLANIF" in raw_role_str or "LIDER" in raw_role_str:
-            role = db.query(Role).filter(Role.nombre_rol == "Planificador").first()
+            role = db.query(Role).filter(
+                (Role.nombre_rol == "Administrador") | (Role.nombre_rol.ilike("%admin%"))
+            ).first()
+            if not role:
+                role = Role(nombre_rol="Administrador", scopes="jira:read,jira:sync,projects:write,admin")
+                db.add(role)
+                db.commit()
+                db.refresh(role)
+        elif "MANAG" in raw_role_str or "PLANIF" in raw_role_str or "LIDER" in raw_role_str or "LÍDER" in raw_role_str:
+            role = db.query(Role).filter(
+                (Role.nombre_rol == "Planificador") |
+                (Role.nombre_rol == "Líder Técnico") |
+                (Role.nombre_rol.ilike("%planif%")) |
+                (Role.nombre_rol.ilike("%lider%")) |
+                (Role.nombre_rol.ilike("%manag%"))
+            ).first()
+            if not role:
+                role = Role(nombre_rol="Planificador", scopes="jira:read,jira:sync,projects:write")
+                db.add(role)
+                db.commit()
+                db.refresh(role)
         elif "DEV" in raw_role_str or "DESARR" in raw_role_str:
-            role = db.query(Role).filter(Role.nombre_rol == "Desarrollador").first()
+            role = db.query(Role).filter(
+                (Role.nombre_rol == "Desarrollador") |
+                (Role.nombre_rol.ilike("%desarr%")) |
+                (Role.nombre_rol.ilike("%dev%"))
+            ).first()
+            if not role:
+                role = Role(nombre_rol="Desarrollador", scopes="jira:read")
+                db.add(role)
+                db.commit()
+                db.refresh(role)
 
     if not role:
         raise HTTPException(status_code=400, detail="El rol especificado no existe.")
