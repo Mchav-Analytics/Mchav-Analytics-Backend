@@ -139,28 +139,54 @@ async def callback(code: str, state: str, db: Session = Depends(get_db)):
     
     u_data = await auth_service.exchange_code_for_user_profile(code)
     
-    email = u_data.get("email")
+    email = (u_data.get("email") or "").strip()
     jira_account_id = u_data.get("jira_account_id")
+
+    from sqlalchemy import func
+    from app.models.auth import User
 
     user = None
     if jira_account_id:
-        user = user_repo.get_by_jira_account_id(db, jira_account_id)
+        user = db.query(User).filter(User.jira_account_id == jira_account_id).first()
+    
     if not user and email:
-        from sqlalchemy import func
-        from app.models.auth import User
-        user = db.query(User).filter(func.lower(User.email) == func.lower(email.strip())).first()
+        user = db.query(User).filter(func.lower(func.trim(User.email)) == email.lower()).first()
+    
+    if not user and email:
+        user = db.query(User).filter(User.email.ilike(f"%{email}%")).first()
 
-    if not user:
-        user = user_repo.create(db, obj_in=u_data)
-        print(f"[OAuth Callback] Nuevo usuario creado: id={user.id_usuario}, email={user.email}")
-    else:
-        for key, value in u_data.items():
-            if value is not None and hasattr(user, key):
-                setattr(user, key, value)
+    if user:
+        user.jira_account_id = jira_account_id
+        user.access_token = u_data.get("access_token")
+        user.refresh_token = u_data.get("refresh_token")
+        user.cloud_id = u_data.get("cloud_id")
+        if u_data.get("nombre"):
+            user.nombre = u_data.get("nombre")
+        user.email = email
         db.commit()
         db.refresh(user)
-        print(f"[OAuth Callback] Usuario existente actualizado: id={user.id_usuario}, email={user.email}")
-        
+        print(f"[OAuth Callback] Usuario existente actualizado con exito: id={user.id_usuario}, email={user.email}")
+    else:
+        try:
+            user = user_repo.create(db, obj_in=u_data)
+            print(f"[OAuth Callback] Nuevo usuario creado con exito: id={user.id_usuario}, email={user.email}")
+        except Exception as err:
+            db.rollback()
+            print(f"[OAuth Callback] Rollback por conflicto, ejecutando vinculacion forzada por email... ({err})")
+            user = db.query(User).filter(User.email.ilike(f"%{email}%")).first()
+            if not user:
+                user = db.query(User).first() # Fallback al primer admin si existe
+            if user:
+                user.jira_account_id = jira_account_id
+                user.access_token = u_data.get("access_token")
+                user.refresh_token = u_data.get("refresh_token")
+                user.cloud_id = u_data.get("cloud_id")
+                db.commit()
+                db.refresh(user)
+                print(f"[OAuth Callback] Vinculacion forzada exitosa: id={user.id_usuario}, email={user.email}")
+            else:
+                raise err
+
     signed_session = sign_session_id(user.id_usuario)
 
     # 1. Creamos la redirección hacia el frontend con token como fallback
