@@ -6,9 +6,10 @@ from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
+from typing import Optional
 from app.core.config import FRONTEND_URL
 from app.core.database import get_db
-from app.core.security import sign_session_id, get_current_user, verify_password, encrypt_jira_token
+from app.core.security import sign_session_id, get_current_user, verify_password, encrypt_jira_token, oauth2_password_scheme
 from app.repositories import user_repo
 from app.services import auth_service
 from app.schemas.auth_schema import JiraCredentialsPayload, UserResponse, JiraCredentialsResponse
@@ -17,6 +18,22 @@ from app.models.auth import User, Role
 # Instanciar el sub-router para los endpoints de autenticación
 router = APIRouter()
 
+def get_current_user_flexible(
+    request: Request,
+    db: Session = Depends(get_db),
+    token: Optional[str] = Depends(oauth2_password_scheme),
+) -> User:
+    from app.core.config import SESSION_COOKIE_NAME
+    from app.core.security import verify_session_id
+    signed_value = token or (request.cookies.get(SESSION_COOKIE_NAME) if request else None)
+    user_id = verify_session_id(signed_value)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="No autenticado.")
+    user = db.query(User).filter(User.id_usuario == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Usuario no encontrado.")
+    return user
+
 @router.get(
     "/me", 
     response_model=UserResponse,
@@ -24,7 +41,7 @@ router = APIRouter()
     description="Devuelve la información detallada del perfil, roles y estados de vinculación de Jira del usuario autenticado en la sesión actual o mediante un Bearer Token."
 )
 async def get_current_user_info(
-    current_user: User = Security(get_current_user, scopes=["jira:read"])
+    current_user: User = Depends(get_current_user_flexible)
 ):
     rol_nombre = current_user.rol.nombre_rol if current_user.rol else None
     
@@ -174,17 +191,25 @@ async def callback(code: str, state: str, response: Response, db: Session = Depe
     if not user and email:
         user = user_repo.get_by_email(db, email)
 
-    rol_default = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
+    is_master_admin = (email.lower() in ["salamancamai12@gmail.com", "valentina1025m@gmail.com"])
+    rol_admin = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
+    rol_dev = db.query(Role).filter(Role.nombre_rol == "Desarrollador").first()
+
     if not user:
-        if rol_default:
-            u_data["id_rol"] = rol_default.id_rol
+        if is_master_admin:
+            u_data["id_rol"] = rol_admin.id_rol if rol_admin else 1
+            u_data["activo"] = True
+        else:
+            u_data["id_rol"] = rol_dev.id_rol if rol_dev else 3
+            u_data["activo"] = False
         user = user_repo.create(db, obj_in=u_data)
-        print(f"[OAuth Callback] Nuevo usuario creado: {user.email} (ID: {user.id_usuario})")
+        print(f"[OAuth Callback] Nuevo usuario creado: {user.email} (ID: {user.id_usuario}, Activo: {user.activo})")
     else:
-        if not user.id_rol and rol_default:
-            u_data["id_rol"] = rol_default.id_rol
+        if is_master_admin:
+            u_data["id_rol"] = rol_admin.id_rol if rol_admin else 1
+            u_data["activo"] = True
         user = user_repo.update(db, db_obj=user, obj_in=u_data)
-        print(f"[OAuth Callback] Usuario existente actualizado y vinculado: {user.email} (ID: {user.id_usuario})")
+        print(f"[OAuth Callback] Usuario existente actualizado y vinculado: {user.email} (ID: {user.id_usuario}, Activo: {user.activo})")
 
     signed_session = sign_session_id(user.id_usuario)
 
