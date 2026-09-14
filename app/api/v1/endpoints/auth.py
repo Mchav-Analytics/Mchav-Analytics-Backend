@@ -146,8 +146,18 @@ async def callback(code: str, state: str, db: Session = Depends(get_db)):
         user = user_repo.get_by_email(db, u_data["email"])
 
     if not user:
-        user = user_repo.create(db, obj_in=u_data)
-        print(f"[OAuth Callback] Nuevo usuario creado: id={user.id_usuario}, email={user.email}")
+        try:
+            user = user_repo.create(db, obj_in=u_data)
+            print(f"[OAuth Callback] Nuevo usuario creado: id={user.id_usuario}, email={user.email}")
+        except Exception as err:
+            db.rollback()
+            print(f"[OAuth Callback] Error creando usuario, buscando por email fallback... ({err})")
+            existing = user_repo.get_by_email(db, u_data.get("email"))
+            if existing:
+                user = user_repo.update(db, db_obj=existing, obj_in=u_data)
+                print(f"[OAuth Callback] Usuario existente actualizado mediante fallback: id={user.id_usuario}, email={user.email}")
+            else:
+                raise err
     else:
         user = user_repo.update(db, db_obj=user, obj_in=u_data)
         print(f"[OAuth Callback] Usuario existente actualizado: id={user.id_usuario}, email={user.email}")
