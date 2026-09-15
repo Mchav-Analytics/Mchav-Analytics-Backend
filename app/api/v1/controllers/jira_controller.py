@@ -87,8 +87,30 @@ async def get_jira_metrics(
     if cached_data:
         return cached_data
     
-    # 2. Consultar en paralelo mediante httpx y asyncio.gather
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    # 2. Vía rápida: Si existen datos localmente en BD, calcular métricas en milisegundos (< 5ms)
+    try:
+        db_projects = db.query(models.Proyecto).count()
+        db_issues = db.query(models.Issue).count()
+        if db_projects > 0 or db_issues > 0:
+            done_cnt = db.query(models.Issue).filter(models.Issue.status_actual.ilike("%done%")).count()
+            progress_cnt = db.query(models.Issue).filter(models.Issue.status_actual.ilike("%progress%")).count()
+            critical_cnt = db.query(models.Issue).filter(
+                models.Issue.issue_type.ilike("%bug%"),
+                models.Issue.priority.ilike("%high%")
+            ).count()
+            result_data = {
+                "active_projects": db_projects,
+                "completed_tickets": done_cnt,
+                "in_progress_tickets": progress_cnt,
+                "critical_bugs": critical_cnt
+            }
+            metrics_cache.set(cache_key, result_data)
+            return result_data
+    except Exception:
+        pass
+    
+    # 3. Vía fallback: Consultar en paralelo a la API REST externa de Jira
+    async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             async def _search_jql(jql_query: str):
                 res = await client.get(f"{base_jira_url}/search/jql?jql={jql_query}&maxResults=0", headers=headers)
@@ -120,7 +142,7 @@ async def get_jira_metrics(
                 "critical_bugs": bugs_data.get("total", 0)
             }
             
-            # Guardar en caché por 60 segundos
+            # Guardar en caché por 300 segundos (5 minutos)
             metrics_cache.set(cache_key, result_data)
             return result_data
         except Exception as e:

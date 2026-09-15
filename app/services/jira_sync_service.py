@@ -296,8 +296,66 @@ async def sync_issues_for_project(
                     created_t = history.get("created")
                     t_date = datetime.fromisoformat(created_t.replace("Z", "+00:00")) if created_t else datetime.now(timezone.utc)
                     
+                    author_obj = history.get("author") or {}
+                    author_name = author_obj.get("displayName") or "Unknown"
+                    author_email = author_obj.get("emailAddress") or ""
+                    
                     for item in history.get("items", []):
                         field_name = item.get("field")
+                        
+                        # --- NUEVA LÓGICA DE AUDITORÍA DE SCOPE CREEP ---
+                        if field_name == "Sprint":
+                            from_ids_raw = item.get("from") or ""
+                            to_ids_raw = item.get("to") or ""
+                            
+                            from_ids = [s.strip() for s in str(from_ids_raw).split(",") if s.strip()]
+                            to_ids = [s.strip() for s in str(to_ids_raw).split(",") if s.strip()]
+                            
+                            # Sprints de los que salió (REMOVED)
+                            removed_from = set(from_ids) - set(to_ids)
+                            for s_id in removed_from:
+                                from app.models.jira import AuditoriaSprint
+                                existing_aud = db.query(AuditoriaSprint).filter(
+                                    AuditoriaSprint.id_sprint == s_id,
+                                    AuditoriaSprint.id_jira == db_issue.id_jira,
+                                    AuditoriaSprint.accion == "REMOVED",
+                                    AuditoriaSprint.fecha_evento == t_date
+                                ).first()
+                                if not existing_aud:
+                                    aud_rem = AuditoriaSprint(
+                                        id_sprint=s_id,
+                                        id_jira=db_issue.id_jira,
+                                        accion="REMOVED",
+                                        fecha_evento=t_date,
+                                        autor_nombre=author_name,
+                                        autor_email=author_email
+                                    )
+                                    db.add(aud_rem)
+
+                            # Sprints a los que entró (ADDED)
+                            added_to = set(to_ids) - set(from_ids)
+                            for s_id in added_to:
+                                from app.models.jira import AuditoriaSprint
+                                existing_aud = db.query(AuditoriaSprint).filter(
+                                    AuditoriaSprint.id_sprint == s_id,
+                                    AuditoriaSprint.id_jira == db_issue.id_jira,
+                                    AuditoriaSprint.accion == "ADDED",
+                                    AuditoriaSprint.fecha_evento == t_date
+                                ).first()
+                                if not existing_aud:
+                                    aud_add = AuditoriaSprint(
+                                        id_sprint=s_id,
+                                        id_jira=db_issue.id_jira,
+                                        accion="ADDED",
+                                        fecha_evento=t_date,
+                                        autor_nombre=author_name,
+                                        autor_email=author_email
+                                    )
+                                    db.add(aud_add)
+                                    
+                            db.commit()
+                        # ------------------------------------------------
+                        
                         if field_name == "status":
                             from_status = item.get("fromString")
                             to_status = item.get("toString")

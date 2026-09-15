@@ -1,6 +1,6 @@
 # app/api/v1/api.py
 from fastapi import APIRouter
-from app.api.v1.controllers import auth_router, jira_router, projects_router, jql_router, users_router, reports_router, developers_router, alerts_router, ai_router
+from app.api.v1.controllers import auth_router, jira_router, projects_router, jql_router, users_router, reports_router, developers_router, alerts_router, ai_router, flow_router
 
 api_router = APIRouter()
 
@@ -14,3 +14,4 @@ api_router.include_router(reports_router, prefix="/reports", tags=["reports"])  
 api_router.include_router(developers_router, prefix="/developers", tags=["developers"]) # /api/v1/developers
 api_router.include_router(alerts_router, prefix="/alerts", tags=["alerts"])     # /api/v1/alerts
 api_router.include_router(ai_router, prefix="/ai", tags=["ai"])                 # /api/v1/ai
+api_router.include_router(flow_router, prefix="/flow", tags=["flow"])           # /api/v1/flow
