@@ -10,7 +10,7 @@ from sqlalchemy import func
 from app.core.database import get_db
 from app.core.security import get_current_user
 import app.models as models
-from app.services.gemini_service import chat_with_gemini
+from app.services.gemini_service import chat_with_gemini, generate_report_insights
 from app.services.sprint_health_service import calculate_sprint_health
 from app.services.dev_metrics_service import get_base_status
 from app.services.kpi import get_issue_cycle_time_days
@@ -23,6 +23,27 @@ class ChatMessageRequest(BaseModel):
     project_id: Optional[str] = "PROJ-01"
     history: Optional[List[Dict[str, str]]] = []
 
+
+class ReportInsightsRequest(BaseModel):
+    reportType: Optional[str] = "sprint"
+    sprintName: Optional[str] = "Sprint Actual"
+    velocity: Optional[float] = 0.0
+    throughput: Optional[int] = 0
+    cycleTime: Optional[float] = 0.0
+    blockedDays: Optional[int] = 0
+    bugs: Optional[int] = 0
+    totalScope: Optional[float] = 0.0
+    sprintHealth: Optional[float] = 0.0
+    p50: Optional[float] = 0.0
+    p85: Optional[float] = 0.0
+    p95: Optional[float] = 0.0
+    plannedIssues: Optional[int] = 0
+    developerName: Optional[str] = None
+    developerId: Optional[str] = None
+    projectId: Optional[str] = "PROJ-01"
+    projectMetrics: Optional[List[Dict[str, Any]]] = []
+
+>>>>>>> origin/Prueba_Desarrollo
 
 def _build_rich_project_context(db: Session, project_id: str, user_name: str) -> Dict[str, Any]:
     """
@@ -193,3 +214,84 @@ def get_suggested_prompts():
         {"id": 3, "text": "¿Quiénes tienen mayor carga de WIP en progreso?", "category": "Carga de Trabajo"},
         {"id": 4, "text": "¿Qué recomendaciones estratégicas tienes para el equipo?", "category": "Estrategia"}
     ]
+
+
+@router.post("/generate-report-insights")
+def ai_report_insights(
+    payload: ReportInsightsRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    POST /api/v1/ai/generate-report-insights
+    Recibe métricas numéricas del frontend y retorna un JSON con análisis textual para inyectar en el reporte.
+    """
+    metrics = payload.dict()
+    report_type = metrics.get('reportType', 'sprint')
+    
+    # Inyectar datos históricos reales para desarrolladores
+    if report_type == "desarrollador":
+        dev_id = metrics.get("developerId")
+        dev_name = metrics.get("developerName")
+        proj_id = metrics.get("projectId") or "PROJ-01"
+        
+        try:
+            from app.models.jira import Sprint, Issue
+            from sqlalchemy import desc
+            
+            # Obtener los últimos 3 sprints cerrados
+            sprints = db.query(Sprint).filter(
+                Sprint.id_proyecto == proj_id,
+                Sprint.estado.in_(["closed", "cerrado", "finalizado", "active"])
+            ).order_by(desc(Sprint.fecha_fin)).limit(3).all()
+            
+            history_data = []
+            for sprint in reversed(sprints):  # Orden cronológico (más antiguo primero)
+                issues = db.query(Issue).filter(
+                    Issue.id_sprint == sprint.id_sprint,
+                    ((Issue.assignee_id == dev_id) | (Issue.assignee_name.ilike(f"%{dev_name}%")))
+                ).all()
+                
+                completados = len([i for i in issues if get_base_status(i.status_actual) == "DONE"])
+                bloqueos = len([i for i in issues if "bloqueado" in (i.status_actual or "").lower() or "blocked" in (i.status_actual or "").lower()])
+                
+                # Calcular Cycle Time promedio real
+                ct_list = [get_issue_cycle_time_days(i) for i in issues if get_base_status(i.status_actual) == "DONE"]
+                ct_promedio = round(sum(ct_list) / len(ct_list), 1) if ct_list else 0.0
+                
+                planned_sp = sum([(i.story_points or 0) for i in issues])
+                completed_sp = sum([(i.story_points or 0) for i in issues if get_base_status(i.status_actual) == "DONE"])
+                
+                history_data.append({
+                    "sprintName": sprint.nombre,
+                    "ticketsCompletados": completados,
+                    "cycleTime": ct_promedio,
+                    "bloqueos": bloqueos,
+                    "planned": planned_sp,
+                    "completed": completed_sp
+                })
+            metrics["history_data"] = history_data
+        except Exception as e:
+            print(f"Error fetching real dev history: {e}")
+            metrics["history_data"] = []
+
+    
+    # Textos por defecto en caso de fallo (fallback)
+    fallback_insights = {
+        "executiveSummary": "Durante el período evaluado, el equipo mantuvo un ritmo de trabajo estable. No se dispone de análisis avanzado en este momento.",
+        "burnupFinding": "El alcance se mantuvo constante sin desviaciones significativas.",
+        "cfdFinding": "El flujo de trabajo operó sin cuellos de botella críticos detectados.",
+        "predictabilityConclusion": "La predictibilidad se mantiene dentro de los rangos históricos esperados.",
+        "valueDelivery": f"Se entregaron {metrics.get('velocity', 0)} Story Points.",
+        "efficiency": f"Se registró un tiempo de ciclo de {metrics.get('cycleTime', 0)} días.",
+        "technicalQuality": "No se registraron defectos alarmantes.",
+        "generalConclusion": "El equipo se encuentra operando dentro de los márgenes previstos."
+    }
+    
+    report_type = metrics.get('reportType', 'sprint')
+    insights = generate_report_insights(metrics, fallback_insights, report_type)
+    
+    return {
+        "status": "success",
+        "data": insights
+    }

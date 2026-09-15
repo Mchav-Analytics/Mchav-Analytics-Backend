@@ -118,3 +118,18 @@ class MapeoEstado(Base):
     id_proyecto = Column(String(50), ForeignKey("proyectos.id_proyecto", ondelete="CASCADE"), nullable=False)
     estado_jira = Column(String(50), nullable=False)       # Nombre del estado tal cual viene de Jira
     estado_base = Column(String(20), nullable=False)       # Categoria base ('TODO', 'IN_PROGRESS', 'DONE')
+
+class AuditoriaSprint(Base):
+    """
+    Modelo ORM que almacena el historial de cambios de alcance (Scope Creep) de los Sprints.
+    Tabla: 'auditoria_sprints'
+    """
+    __tablename__ = "auditoria_sprints"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    id_sprint = Column(String(50), ForeignKey("sprints.id_sprint", ondelete="CASCADE"), nullable=False, index=True)
+    id_jira = Column(String(50), ForeignKey("issues.id_jira", ondelete="CASCADE"), nullable=False)
+    accion = Column(String(20), nullable=False)            # 'ADDED' o 'REMOVED'
+    fecha_evento = Column(DateTime(timezone=True), nullable=False)
+    autor_nombre = Column(String(150), nullable=True)      # Quién originó el cambio
+    autor_email = Column(String(200), nullable=True)

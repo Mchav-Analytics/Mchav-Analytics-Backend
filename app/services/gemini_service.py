@@ -276,3 +276,225 @@ INSTRUCCIONES DE RESPUESTA Y ANÁLISIS:
         return reply
 
     return "Disculpa, en este momento no pude obtener respuesta del motor analítico de Gemini. Por favor verifica tu conexión o intenta nuevamente."
+
+
+def _build_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
+    return f"""
+Actúa como un Agile Coach experto evaluando la salud general del proyecto.
+Tu objetivo es evaluar el desempeño global basándote en métricas reales.
+No uses formato de 'plantilla de IA'. Escribe párrafos fluidos, analíticos y directos.
+Métricas del proyecto:
+- Velocidad: {v} Story Points completados.
+- Rendimiento (Throughput): {t} tickets completados.
+- Tiempo de ciclo promedio: {ct} días.
+- Días bloqueados acumulados: {bd} días.
+- Bugs reportados: {bugs}.
+- Alcance total: {scope} Story Points.
+- Sprint Health Score promedio: {health}/100.
+- P50: {p50} días, P85: {p85} días, P95: {p95} días.
+- Porcentaje de completitud: {pct}%.
+
+ESTRUCTURA ESTRICTA DE CADA SECCIÓN (OBLIGATORIO):
+El sistema separa el reporte usando etiquetas '[PROYECTO_X] TITULO'.
+
+LAS 4 SECCIONES A DESARROLLAR (Debes incluir EXACTAMENTE estas 4 en este orden):
+
+[PROYECTO_1] CONTEXTO GENERAL DEL PERIODO
+  - Escribe un párrafo evaluando el rendimiento global del proyecto.
+  
+[PROYECTO_2] ESTADO DEL FLUJO DE TRABAJO Y CUELLOS DE BOTELLA
+  - Análisis detallado del cycle time, throughput y días de bloqueo en un párrafo fluido.
+
+[PROYECTO_3] ANÁLISIS DE PREDICTIBILIDAD Y RIESGOS
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_BURNUP]
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_VELOCIDAD]
+  - Basado en los percentiles P50/P85/P95, evalúa qué tan predecible es la entrega del proyecto.
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_FLUJO]
+
+[PROYECTO_4] CONCLUSIONES ESTRATÉGICAS Y PLAN DE ACCIÓN
+  - Conclusiones fluidas y pasos accionables recomendados para el liderazgo técnico.
+"""
+
+def _build_desarrollador_prompt(metrics, v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
+    import json
+    history = metrics.get('history_data', [])
+    history_str = json.dumps(history, indent=2) if history else 'Sin historial'
+    dev_name = metrics.get('developerName') or 'el desarrollador'
+    
+    return f"""
+Actúa como un Tech Lead analítico evaluando a {dev_name}.
+Tu objetivo es evaluar el desempeño de este desarrollador basándote en métricas personales reales.
+No uses formato de 'plantilla de IA'. Escribe párrafos fluidos y profesionales (evita saludos coloquiales como 'Hola a todos', ve directo al análisis).
+
+=== HISTORIAL RECIENTE ===
+{history_str}
+==========================
+
+ESTRUCTURA ESTRICTA DE CADA SECCIÓN (OBLIGATORIO):
+El sistema UI separa el reporte usando etiquetas '# 0X — TITULO'.
+1. TITULO EN FORMATO H1 (# 0X — NOMBRE EN MAYUSCULAS).
+2. ANALISIS FLUIDO.
+
+LAS 4 SECCIONES A DESARROLLAR (Debes incluir EXACTAMENTE estas 4 en este orden):
+
+# 01 — PERFIL DE DESEMPEÑO
+  - Escribe un párrafo inicial directo y profesional resumiendo el estado general de {dev_name}.
+  - Inmediatamente después, inyecta OBLIGATORIAMENTE la etiqueta: [TABLA_EVOLUCION]
+  - Luego, redacta un párrafo analizando su evolución histórica basada en la tabla.
+
+# 02 — ACTIVIDAD Y ENTREGA
+  - Escribe un breve párrafo analizando su throughput, la cantidad de bugs introducidos, y los puntos entregados.
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_VELOCIDAD]
+  - Y con un cierre analítico de los datos.
+
+# 03 — FLUJO Y PRODUCTIVIDAD
+  - Escribe un análisis profundo de su ritmo y bloqueos.
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_FLUJO]
+
+# 04 — DIAGNÓSTICO Y PLAN DE MEJORA
+  - Basado en los datos técnicos, define de 2 a 3 hallazgos clave y un plan de acción sugerido para el desarrollador.
+"""
+
+def _build_general_prompt(metrics):
+    proj_metrics = metrics.get('projectMetrics', [])
+    total_sp = metrics.get('velocity', 0)
+    total_tickets = metrics.get('throughput', 0)
+    
+    proyectos_texto = ""
+    for p in proj_metrics:
+        proyectos_texto += f"- Proyecto: {p.get('projectName')}, SP Completados: {p.get('velocity')}, Tickets: {p.get('throughput')}, Cycle Time: {p.get('cycleTime')} días, Bloqueos: {p.get('blockedDays')} días, Bugs: {p.get('bugs')}\n"
+    
+    return f"""
+Actúa como un Director de Ingeniería (VP of Engineering) evaluando un portafolio de múltiples proyectos.
+Genera un "Informe Ejecutivo de Rendimiento" consolidado. 
+El tono debe ser fluido, analítico, altamente gerencial, directo, estratégico y basado en datos empíricos.
+No uses formato de 'plantilla de IA'. Evita saludos, inicia inmediatamente con el reporte narrativo.
+
+Datos Agregados del Portafolio:
+- Total Story Points Entregados: {total_sp}
+- Total Tickets Completados: {total_tickets}
+
+Desglose por Proyectos:
+{proyectos_texto}
+
+ESTRUCTURA ESTRICTA DE CADA SECCIÓN (OBLIGATORIO):
+El sistema separa el reporte usando etiquetas '# 0X — TITULO'.
+1. TITULO EN FORMATO H1 (# 0X — TITULO).
+2. ANALISIS FLUIDO.
+
+LAS 3 SECCIONES A DESARROLLAR (Debes incluir EXACTAMENTE estas 3 en este orden):
+
+# 01 — RESUMEN EJECUTIVO DEL PORTAFOLIO
+  - Un párrafo resumiendo de manera fluida el desempeño agregado de los proyectos seleccionados.
+  - Inmediatamente después, inyecta OBLIGATORIAMENTE la etiqueta: [TABLA_PORTAFOLIO]
+  - Luego, redacta un párrafo destacando qué proyectos lideran la entrega y cuáles presentan mayores riesgos (bugs o bloqueos).
+
+# 02 — RENDIMIENTO COMPARATIVO
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_PORTAFOLIO_VELOCIDAD]
+  - Analiza de forma discursiva y analítica la distribución de Story Points entre los diferentes proyectos. ¿Está equilibrada la entrega de valor?
+
+# 03 — CONCLUSIONES Y RIESGOS ESTRATÉGICOS
+  - Redacta de 2 a 3 párrafos de conclusiones ejecutivas sobre la salud de estos proyectos, cuellos de botella observados y recomendaciones de mejora estructural.
+"""
+
+def generate_report_insights(metrics: dict, fallback: dict, report_type: str = "sprint") -> str:
+    if not is_gemini_configured():
+        return _get_fallback_insights(report_type)
+
+    if report_type == "general":
+        prompt = _build_general_prompt(metrics)
+    elif report_type == "desarrollador":
+        v = metrics.get("velocity", 0)
+        t = metrics.get("throughput", 0)
+        ct = metrics.get("cycleTime", 0)
+        bd = metrics.get("blockedDays", 0)
+        bugs = metrics.get("bugs", 0)
+        scope = metrics.get("scope", 0)
+        health = metrics.get("sprintHealth", 0)
+        p50 = metrics.get("p50", 0)
+        p85 = metrics.get("p85", 0)
+        p95 = metrics.get("p95", 0)
+        planned = metrics.get("planned", 0)
+        pct = metrics.get("completionPct", 0)
+        prompt = _build_desarrollador_prompt(metrics, v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
+    elif report_type == "proyecto":
+        v = metrics.get("velocity", 0)
+        t = metrics.get("throughput", 0)
+        ct = metrics.get("cycleTime", 0)
+        bd = metrics.get("blockedDays", 0)
+        bugs = metrics.get("bugs", 0)
+        scope = metrics.get("scope", 0)
+        health = metrics.get("sprintHealth", 0)
+        p50 = metrics.get("p50", 0)
+        p85 = metrics.get("p85", 0)
+        p95 = metrics.get("p95", 0)
+        planned = metrics.get("planned", 0)
+        pct = metrics.get("completionPct", 0)
+        prompt = _build_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
+    else:
+        v = metrics.get("velocity", 0)
+        t = metrics.get("throughput", 0)
+        ct = metrics.get("cycleTime", 0)
+        bd = metrics.get("blockedDays", 0)
+        bugs = metrics.get("bugs", 0)
+        scope = metrics.get("scope", 0)
+        health = metrics.get("sprintHealth", 0)
+        p50 = metrics.get("p50", 0)
+        p85 = metrics.get("p85", 0)
+        p95 = metrics.get("p95", 0)
+        planned = metrics.get("planned", 0)
+        pct = metrics.get("completionPct", 0)
+        prompt = _build_sprint_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
+
+    reply = _call_gemini_rest_api(prompt, temperature=0.7, max_tokens=2500)
+    if reply:
+        return reply
+
+    return _get_fallback_insights(report_type)
+
+def _get_fallback_insights(report_type: str) -> str:
+    if report_type == "general":
+        return """# 01 — RESUMEN EJECUTIVO DEL PORTAFOLIO\nAnálisis de IA no disponible en este momento.\n\n[TABLA_PORTAFOLIO]\n\n# 02 — RENDIMIENTO COMPARATIVO\n[GRAFICA_PORTAFOLIO_VELOCIDAD]\n### Análisis de entrega\nAnálisis de IA no disponible.\n\n# 03 — CONCLUSIONES Y RIESGOS ESTRATÉGICOS\nAnálisis de IA no disponible.\n"""
+    elif report_type == "desarrollador":
+        return """# 01 — PERFIL DE DESEMPEÑO\nAnálisis de IA no disponible.\n\n[TABLA_EVOLUCION]\n\n# 02 — ACTIVIDAD Y ENTREGA\n[GRAFICA_VELOCIDAD]\n### Análisis de distribución\nAnálisis de IA no disponible.\n\n# 03 — FLUJO Y PRODUCTIVIDAD\n[GRAFICA_FLUJO]\n### Lectura del flujo\nAnálisis de IA no disponible.\n\n# 04 — DIAGNÓSTICO Y PLAN DE MEJORA\n### Hallazgos clave\nAnálisis de IA no disponible.\n"""
+    elif report_type == "proyecto":
+        return """[PROYECTO_1] CONTEXTO GENERAL DEL PERIODO\nAnálisis de IA no disponible.\n[PROYECTO_2] ESTADO DEL FLUJO DE TRABAJO Y CUELLOS DE BOTELLA\nAnálisis de IA no disponible.\n[PROYECTO_3] ANÁLISIS DE PREDICTIBILIDAD Y RIESGOS\nAnálisis de IA no disponible.\n[PROYECTO_4] CONCLUSIONES ESTRATÉGICAS Y PLAN DE ACCIÓN\nAnálisis de IA no disponible.\n"""
+        return """# 01 — CONTEXTO GENERAL DEL PERIODO\nAnálisis de IA no disponible.\n# 02 — ESTADO DEL FLUJO DE TRABAJO Y CUELLOS DE BOTELLA\nAnálisis de IA no disponible.\n# 03 — ANÁLISIS DE PREDICTIBILIDAD Y RIESGOS\nAnálisis de IA no disponible.\n# 04 — CONCLUSIONES ESTRATÉGICAS Y PLAN DE ACCIÓN\nAnálisis de IA no disponible.\n"""
+    else:
+        return """# 01 — RESUMEN DEL SPRINT\nAnálisis de IA no disponible.\n\n# 02 — DESEMPEÑO Y VELOCIDAD\nAnálisis de IA no disponible.\n\n# 03 — FLUJO Y ESTABILIDAD\nAnálisis de IA no disponible.\n\n# 04 — PLAN DE MEJORA CONTINUA\nAnálisis de IA no disponible.\n"""
+
+def _build_sprint_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
+    return f"""
+Actúa como un Scrum Master experto analizando el desempeño del sprint actual.
+Tu objetivo es realizar un reporte analítico basándote en estos datos empíricos:
+Velocidad: {v} SP
+Throughput: {t} tickets
+Cycle Time: {ct} días
+Bloqueos: {bd} días
+Bugs: {bugs}
+Salud: {health}/100
+
+No uses formato de 'plantilla de IA'. Escribe párrafos fluidos y reflexivos.
+
+ESTRUCTURA ESTRICTA DE CADA SECCIÓN (OBLIGATORIO):
+El sistema separa el reporte usando etiquetas '# 0X — TITULO'.
+1. TITULO EN FORMATO H1 (# 0X — TITULO).
+2. ANALISIS FLUIDO.
+
+LAS 4 SECCIONES A DESARROLLAR (Debes incluir EXACTAMENTE estas 4 en este orden):
+
+# 01 — RESUMEN DEL SPRINT
+  - Escribe un párrafo inicial resumiendo la evaluación general del periodo y su salud.
+
+# 02 — DESEMPEÑO Y VELOCIDAD
+  - Redacta un análisis reflexivo sobre la velocidad y throughput alcanzados.
+
+# 03 — FLUJO Y ESTABILIDAD
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_BURNUP]
+  - Escribe un análisis profundo del flujo de trabajo, el cycle time y cómo los bloqueos impactaron la entrega.
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_VELOCIDAD]
+
+# 04 — PLAN DE MEJORA CONTINUA
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_FLUJO]
+  - Basado en los datos técnicos, propón 2 o 3 acciones de mejora estructurales en formato de párrafo fluido.
+"""

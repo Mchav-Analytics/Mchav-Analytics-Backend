@@ -126,14 +126,16 @@ def login():
     summary="Callback de autenticación OAuth 2.0",
     description="Endpoint de retorno configurado en Atlassian. Valida el estado CSRF, intercambia el código por el perfil del usuario y establece la sesión."
 )
-async def callback(code: str, state: str, response: Response, db: Session = Depends(get_db)):
-    if not auth_service.validate_oauth_state(state):
-        raise HTTPException(
-            status_code=400, 
-            detail="Estado (State) inválido o expirado. Intente iniciar sesión nuevamente."
-        )
+async def callback(code: str = None, state: str = None, error: str = None, response: Response = None, db: Session = Depends(get_db)):
+    if error or not code or not state or not auth_service.validate_oauth_state(state):
+        # Redirigir limpiamente al frontend si el estado expiró (reinicio de servidor o refresco manual)
+        return RedirectResponse(url=f"{FRONTEND_URL}/?login=expired", status_code=302)
     
-    u_data = await auth_service.exchange_code_for_user_profile(code)
+    try:
+        u_data = await auth_service.exchange_code_for_user_profile(code)
+    except Exception as e:
+        print("Error al canjear código OAuth:", e)
+        return RedirectResponse(url=f"{FRONTEND_URL}/?login=error", status_code=302)
     
     email = (u_data.get("email") or "").strip()
     jira_account_id = u_data.get("jira_account_id")

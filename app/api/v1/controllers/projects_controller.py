@@ -287,6 +287,7 @@ async def get_project_sprints(
     """
     GET /api/v1/projects/{proyecto_id}/sprints
     Obtiene la lista de sprints pertenecientes al proyecto con paginación y ordenamiento.
+    Incluye sp_comprometidos y sp_completados calculados desde los issues reales de la BD.
     """
     user_id = deps.get_current_user_id(request)
     deps.check_user_exists(db, user_id)
@@ -299,7 +300,170 @@ async def get_project_sprints(
         sort=sort,
         order=order
     )
-    return sprints
+    
+    # Calcular SP comprometidos y completados para cada sprint desde issues reales
+    done_statuses = {"done", "listo", "resuelto", "resolved", "cerrado", "closed", "finalizado", "completado"}
+    
+    result = []
+    for sp in sprints:
+        sp_id = sp.id_sprint
+        
+        # Obtener todos los issues asignados a este sprint
+        issues_in_sprint = db.query(models.Issue).filter(
+            models.Issue.id_sprint == sp_id
+        ).all()
+        
+        sp_comprometidos = 0.0
+        sp_completados = 0.0
+        
+        for issue in issues_in_sprint:
+            pts = float(issue.story_points or 0.0)
+            sp_comprometidos += pts
+            
+            status = (issue.status_actual or "").lower().strip()
+            if status in done_statuses:
+                sp_completados += pts
+        
+        result.append({
+            "id_sprint": sp.id_sprint,
+            "id_proyecto": sp.id_proyecto,
+            "nombre": sp.nombre,
+            "estado": sp.estado,
+            "fecha_inicio": sp.fecha_inicio.isoformat() if sp.fecha_inicio else None,
+            "fecha_fin": sp.fecha_fin.isoformat() if sp.fecha_fin else None,
+            "fecha_finalizacion": sp.fecha_finalizacion.isoformat() if sp.fecha_finalizacion else None,
+            "sp_comprometidos": round(sp_comprometidos, 1),
+            "sp_completados": round(sp_completados, 1),
+            "total_issues": len(issues_in_sprint)
+        })
+    
+    return result
+
+@router.get("/{proyecto_id}/burnup")
+async def get_project_burnup(
+    request: Request,
+    proyecto_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    GET /api/v1/projects/{proyecto_id}/burnup
+    Retorna los datos reales de burnup para el sprint activo (o el último cerrado).
+    """
+    user_id = deps.get_current_user_id(request)
+    deps.check_user_exists(db, user_id)
+    
+    # 1. Buscar sprint activo
+    sprint = db.query(models.Sprint).filter(
+        models.Sprint.id_proyecto == proyecto_id,
+        models.Sprint.estado == 'active'
+    ).first()
+    
+    if not sprint:
+        # Si no hay activo, tomar el último cerrado
+        sprint = db.query(models.Sprint).filter(
+            models.Sprint.id_proyecto == proyecto_id,
+            models.Sprint.estado == 'closed'
+        ).order_by(models.Sprint.fecha_fin.desc()).first()
+        
+    if not sprint or not sprint.fecha_inicio or not sprint.fecha_fin:
+        return []
+
+    # 2. Obtener issues del sprint
+    issues = db.query(models.Issue).filter(models.Issue.id_sprint == sprint.id_sprint).all()
+    if not issues:
+        return []
+        
+    # 3. Calcular alcance total
+    alcance_total = sum(float(i.story_points or 0.0) for i in issues)
+    
+    # 4. Generar rango de fechas del sprint
+    from datetime import timedelta
+    start_date = sprint.fecha_inicio.date()
+    end_date = sprint.fecha_fin.date()
+    
+    days_in_sprint = (end_date - start_date).days
+    if days_in_sprint <= 0:
+        days_in_sprint = 1
+        
+    # Ritmo ideal diario
+    ritmo_diario = alcance_total / days_in_sprint
+    
+    # 5. Mapear issues completados por fecha
+    done_statuses = {"done", "listo", "resuelto", "resolved", "cerrado", "closed", "finalizado", "completado"}
+
+    # Agrupar puntos terminados por fecha
+    completed_by_date = {}
+    count_by_date = {}
+
+    for issue in issues:
+        status = (issue.status_actual or "").lower().strip()
+        if status not in done_statuses:
+            continue
+
+        pts = float(issue.story_points or 0.0)
+
+        # Intentar obtener la fecha real de finalización desde las transiciones
+        done_date = None
+        if hasattr(issue, 'transiciones') and issue.transiciones:
+            for t in sorted(issue.transiciones, key=lambda x: x.fecha_cambio):
+                nuevo = (t.estado_nuevo or "").lower().strip()
+                if nuevo in done_statuses:
+                    fecha_t = t.fecha_cambio.date() if t.fecha_cambio else None
+                    # Solo usar si cae dentro del sprint o antes
+                    if fecha_t and fecha_t <= end_date:
+                        done_date = max(fecha_t, start_date)  # No antes del inicio
+                        break
+
+        # Fallback 1: usar resolved_at si cae dentro del sprint
+        if done_date is None and issue.resolved_at:
+            rd = issue.resolved_at.date()
+            if start_date <= rd <= end_date:
+                done_date = rd
+            elif rd > end_date:
+                # Resuelta después del sprint → asignamos al último día del sprint
+                done_date = end_date
+            else:
+                # Resuelta antes del inicio → primer día del sprint
+                done_date = start_date
+
+        # Fallback 2: issue sin resolved_at pero en estado done → último día del sprint
+        if done_date is None:
+            done_date = end_date
+
+        completed_by_date[done_date] = completed_by_date.get(done_date, 0) + pts
+        count_by_date[done_date] = count_by_date.get(done_date, 0) + 1
+
+    # 6. Construir resultado por día
+    result = []
+    acumulado_completado = 0.0
+
+    from datetime import date
+    today = date.today()
+
+    for i in range(days_in_sprint + 1):
+        current_date = start_date + timedelta(days=i)
+
+        # Ritmo ideal
+        ritmo_ideal = min(ritmo_diario * i, alcance_total)
+
+        # Tareas terminadas este día
+        tareas_hoy = count_by_date.get(current_date, 0)
+        pts_hoy = completed_by_date.get(current_date, 0)
+
+        # Acumular siempre (el sprint ya pasó, mostramos todo)
+        acumulado_completado += pts_hoy
+        trabajo = acumulado_completado
+
+        result.append({
+            "fecha_real": current_date.strftime("%d %b"),
+            "alcance_total": round(alcance_total, 1),
+            "trabajo_completado": round(trabajo, 1),
+            "ritmo_ideal": round(ritmo_ideal, 1),
+            "tareas_completadas": tareas_hoy
+        })
+
+    return result
+
 
 @router.get("/{proyecto_id}/statuses")
 async def get_project_unique_statuses(

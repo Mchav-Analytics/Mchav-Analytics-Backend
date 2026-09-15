@@ -100,6 +100,13 @@ def startup_event():
                 db.add(models.Role(nombre_rol=r_info["nombre_rol"], scopes=r_info["scopes"]))
         db.commit()
 
+        # Eliminar usuarios obsoletos/legados de prueba
+        db.query(models.User).filter(
+            (models.User.nombre == "Usuario") |
+            (models.User.email.in_(["dev@mchav.com", "vhoyos@mchav.com", "cgomez@mchav.com", "aftorres@mchav.com"]))
+        ).delete(synchronize_session=False)
+        db.commit()
+
         rol_desactivado = db.query(models.Role).filter(models.Role.nombre_rol == "Desactivado").first()
         admin_role = db.query(models.Role).filter(models.Role.nombre_rol == "Administrador").first()
 
