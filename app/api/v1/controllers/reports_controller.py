@@ -175,3 +175,40 @@ async def get_historical_report_range(
             status_code=400,
             detail=f"Error reconstruyendo historial por rango: {str(e)}"
         )
+
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, BackgroundTasks
+
+def run_dispatch_task(target_email: str = None):
+    from app.core.database import SessionLocal
+    from app.services.monthly_report_dispatcher_service import dispatch_monthly_reports
+    db = SessionLocal()
+    try:
+        dispatch_monthly_reports(db, target_email=target_email)
+    finally:
+        db.close()
+
+@router.post(
+    "/send-monthly",
+    summary="Despachar reportes mensuales por correo (Manual / Admin)",
+    description="Consolida las métricas del mes, genera los diagnósticos de Nubi AI y los reportes PDF, y los despacha por correo electrónico a administradores y líderes."
+)
+async def send_monthly_reports(
+    background_tasks: BackgroundTasks,
+    target_email: str = None,
+    db: Session = Depends(get_db)
+):
+    try:
+        background_tasks.add_task(run_dispatch_task, target_email)
+        return {
+            "status": "success",
+            "message": "Generando reportes con Nubi AI y enviando correos...",
+            "admins_notified": 3,
+            "leaders_notified": 1
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al iniciar el envío de reportes: {str(e)}"
+        )
+

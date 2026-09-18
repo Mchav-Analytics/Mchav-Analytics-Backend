@@ -37,6 +37,22 @@ def scheduled_sync_job():
     finally:
         db.close()
 
+def scheduled_monthly_reports_job():
+    """
+    Job programado mensual de APScheduler.
+    Se ejecuta el primer día de cada mes a las 08:00 AM para consolidar métricas y despachar correos a Admins y Líderes.
+    """
+    print("[Cron Scheduler] Ejecutando envío mensual de reportes por correo con Nubi AI...")
+    db = SessionLocal()
+    try:
+        from app.services.monthly_report_dispatcher_service import dispatch_monthly_reports
+        result = dispatch_monthly_reports(db)
+        print(f"[Cron Scheduler] Reportes mensuales despachados con éxito: {result}")
+    except Exception as e:
+        print(f"[Cron Scheduler] Error en el trabajo mensual de reportes: {e}")
+    finally:
+        db.close()
+
 def start_scheduler():
     """Inicializa y arranca el planificador de tareas APScheduler."""
     global _scheduler
@@ -49,8 +65,15 @@ def start_scheduler():
             id="automatic_jira_sync",
             replace_existing=True
         )
+        # Programar ejecución mensual automática el 1 de cada mes a las 08:00 AM
+        _scheduler.add_job(
+            scheduled_monthly_reports_job,
+            trigger=CronTrigger(day=1, hour=8, minute=0),
+            id="automatic_monthly_reports",
+            replace_existing=True
+        )
         _scheduler.start()
-        print("[Cron Scheduler] APScheduler iniciado. Tarea 'automatic_jira_sync' programada diariamente a las 02:00 AM.")
+        print("[Cron Scheduler] APScheduler iniciado. Tarea 'automatic_jira_sync' (02:00 AM) y 'automatic_monthly_reports' (1° del mes 08:00 AM) programadas.")
 
 def stop_scheduler():
     """Detiene el planificador si está activo."""

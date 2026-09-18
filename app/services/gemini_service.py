@@ -199,6 +199,32 @@ Usa un tono formal, analítico y corporativo de nivel C-Level.
     )
 
 
+def generar_analisis_ejecutivo_nubi(context_info: str) -> str:
+    """Genera un análisis ejecutivo corto para correos mensuales utilizando Gemini o fallback."""
+    if not is_gemini_configured():
+        return (
+            "Durante este período el equipo ha mantenido un ritmo constante de entregas. "
+            "Se recomienda mantener historias de usuario desglosadas en tamaños no mayores a 8 SP "
+            "para optimizar el flujo continuo y reducir tiempos en progreso."
+        )
+    
+    prompt = f"""
+Actúa como NubI IA, consultor senior de agilidad de MCHAV Analytics.
+Genera un diagnóstico ejecutivo breve (máximo 3 frases) en español para el reporte por correo.
+Métricas clave: {context_info}
+Responde en un párrafo profesional y conciso.
+"""
+    res = _call_gemini_rest_api(prompt, temperature=0.3, max_tokens=150)
+    if res:
+        return res
+    return (
+        "Durante este período el equipo ha mantenido un ritmo constante de entregas. "
+        "Se recomienda mantener historias de usuario desglosadas en tamaños no mayores a 8 SP "
+        "para optimizar el flujo continuo y reducir tiempos en progreso."
+    )
+
+
+
 def chat_with_gemini(user_message: str, context_info: dict = None, conversation_history: list = None) -> str:
     """
     Mantiene una conversación analítica, fluida e inteligente con el usuario basada en datos reales de MCHAV y Jira.

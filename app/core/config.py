@@ -70,3 +70,13 @@ DOCS_PASSWORD = os.getenv("DOCS_PASSWORD", "MchavDocs2026!Sec#Admin").strip()
 # -----------------------------------------------------------------------------
 # Clave de API para el modelo generativo de Google Gemini (AI Dev Coach)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+
+# -----------------------------------------------------------------------------
+# CONFIGURACIÓN DE CORREO SMTP (GMAIL)
+# -----------------------------------------------------------------------------
+MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.gmail.com").strip()
+MAIL_PORT = int(os.getenv("MAIL_PORT", "587"))
+MAIL_USERNAME = os.getenv("MAIL_USERNAME", "").strip()
+MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "").replace(" ", "").strip()
+MAIL_FROM = os.getenv("MAIL_FROM", "").strip() or MAIL_USERNAME
+MAIL_FROM_NAME = os.getenv("MAIL_FROM_NAME", "MCHAV Analytics").strip()
