@@ -31,12 +31,30 @@ def get_issue_cycle_time_days(issue: models.Issue, in_progress_statuses: set[str
             first_progress_date = t.fecha_cambio
             break
             
-    if first_progress_date:
-        delta = issue.resolved_at - first_progress_date
-        return max(0.0, delta.total_seconds() / 86400.0) # Convertir segundos a días
-    else:
-        delta = issue.resolved_at - issue.created_at
-        return max(0.0, delta.total_seconds() / 86400.0)
+    from datetime import timedelta
+    
+    start_date = first_progress_date or issue.created_at
+    if not start_date or issue.resolved_at <= start_date:
+        return 0.0
+        
+    total_days = (issue.resolved_at - start_date).total_seconds() / 86400.0
+    if total_days <= 1.0:
+        return round(total_days, 1)
+
+    # Descontar fines de semana (Lunes=0, ..., Domingo=6)
+    cur = start_date
+    business_seconds = 0.0
+    while cur < issue.resolved_at:
+        if cur.weekday() < 5: # Lunes a Viernes
+            next_day = min(issue.resolved_at, cur.replace(hour=23, minute=59, second=59))
+            sec = (next_day - cur).total_seconds()
+            business_seconds += max(0.0, sec)
+            cur = next_day + timedelta(seconds=1)
+        else:
+            # Saltar sábado/domingo
+            cur = (cur + timedelta(days=1)).replace(hour=0, minute=0, second=0)
+
+    return round(max(0.1, business_seconds / 86400.0), 1)
 
 def calculate_and_save_kpis(db: Session, proyecto_id: str):
     """

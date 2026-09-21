@@ -524,4 +524,178 @@ async def execute_issue_transition(
             "issue_key": issue_key,
             "status": updated_status,
             "message": f"Estado de {issue_key} actualizado a '{updated_status}' en Jira Cloud."
-        }
+        }
+
+
+# ── NUEVOS ENDPOINTS PARA REASIGNACIÓN REAL DE INTEGRANTES EN JIRA CLOUD ──
+
+class IssueReassignRequest(BaseModel):
+    new_assignee: str  # Nombre, email o AccountId del desarrollador
+
+class BulkReassignItem(BaseModel):
+    issue_key: str
+    new_assignee: str
+
+class BulkReassignRequest(BaseModel):
+    assignments: List[BulkReassignItem]
+
+@router.put(
+    "/issues/{issue_key}/assignee",
+    summary="Reasignar desarrollador de un ticket en Jira Cloud"
+)
+@router.post(
+    "/issues/{issue_key}/assignee",
+    include_in_schema=False
+)
+async def reassign_issue(
+    issue_key: str,
+    payload: IssueReassignRequest,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    PUT /api/v1/jira/issues/{issue_key}/assignee
+    Ejecuta la reasignación real del ticket en Jira Cloud y actualiza la BD local.
+    """
+    user_id = deps.get_current_user_id(request)
+    user = deps.check_user_exists(db, user_id)
+    base_jira_url, headers = get_jira_auth_credentials(db, user)
+    
+    target_assignee = payload.new_assignee.strip()
+    account_id = None
+    
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        # 1. Buscar el accountId del desarrollador en Jira si no se proporcionó directamente
+        if len(target_assignee) > 20 and not "@" in target_assignee and not " " in target_assignee:
+            account_id = target_assignee
+        else:
+            # Buscar primero por DB en la tabla usuarios
+            local_u = db.query(models.User).filter(
+                (models.User.nombre.ilike(f"%{target_assignee}%")) |
+                (models.User.email.ilike(f"%{target_assignee}%"))
+            ).first()
+            if local_u and local_u.jira_account_id:
+                account_id = local_u.jira_account_id
+            else:
+                # Buscar dinámicamente en la API de Jira Cloud
+                search_res = await JiraDatasource.search_assignable_user(client, base_jira_url, headers, target_assignee)
+                if isinstance(search_res, list) and len(search_res) > 0:
+                    account_id = search_res[0].get("accountId")
+
+        if not account_id:
+            raise HTTPException(status_code=404, detail=f"No se encontró la cuenta de Jira para '{target_assignee}'.")
+
+        # 2. Reasignar en Jira Cloud
+        try:
+            await JiraDatasource.assign_issue(client, base_jira_url, headers, issue_key, account_id)
+        except Exception as assign_err:
+            raise HTTPException(status_code=502, detail=f"Jira rechazó la reasignación: {str(assign_err)}")
+
+        # 3. Actualizar la base de datos local
+        db_issue = issue_repo.get_by_key(db, issue_key)
+        if db_issue:
+            issue_repo.update(db, db_obj=db_issue, obj_in={
+                "assignee_id": account_id,
+                "assignee_name": target_assignee
+            })
+            if db_issue.id_proyecto:
+                try:
+                    calculate_and_save_kpis(db, db_issue.id_proyecto)
+                except Exception:
+                    pass
+
+        return {
+            "success": True,
+            "issue_key": issue_key,
+            "assignee": target_assignee,
+            "message": f"Ticket {issue_key} reasignado exitosamente a '{target_assignee}' en Jira Cloud."
+        }
+
+@router.post(
+    "/issues/reassign-bulk",
+    summary="Reasignación masiva de tickets en Jira Cloud (Plan de Contingencia)"
+)
+@router.put(
+    "/issues/reassign-bulk",
+    include_in_schema=False
+)
+async def reassign_issues_bulk(
+    payload: BulkReassignRequest,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    POST /api/v1/jira/issues/reassign-bulk
+    Reasigna múltiples tickets de forma masiva en Jira Cloud y actualiza BD local.
+    """
+    user_id = deps.get_current_user_id(request)
+    user = deps.check_user_exists(db, user_id)
+    base_jira_url, headers = get_jira_auth_credentials(db, user)
+
+    results = []
+    success_count = 0
+
+    async with httpx.AsyncClient(timeout=25.0) as client:
+        for item in payload.assignments:
+            key = item.issue_key
+            target = item.new_assignee.strip()
+            account_id = None
+
+            try:
+                # 1. Resolver accountId
+                if len(target) > 20 and not "@" in target and not " " in target:
+                    account_id = target
+                else:
+                    local_u = db.query(models.User).filter(
+                        (models.User.nombre.ilike(f"%{target}%")) |
+                        (models.User.email.ilike(f"%{target}%"))
+                    ).first()
+                    if local_u and local_u.jira_account_id:
+                        account_id = local_u.jira_account_id
+                    else:
+                        search_res = await JiraDatasource.search_assignable_user(client, base_jira_url, headers, target)
+                        if isinstance(search_res, list) and len(search_res) > 0:
+                            account_id = search_res[0].get("accountId")
+
+                if not account_id:
+                    results.append({
+                        "issue_key": key,
+                        "success": False,
+                        "assignee_name": target,
+                        "message": f"No se encontró ID de usuario Jira para '{target}'"
+                    })
+                    continue
+
+                # 2. Ejecutar cambio en Jira Cloud
+                await JiraDatasource.assign_issue(client, base_jira_url, headers, key, account_id)
+
+                # 3. Actualizar BD local
+                db_issue = issue_repo.get_by_key(db, key)
+                if db_issue:
+                    issue_repo.update(db, db_obj=db_issue, obj_in={
+                        "assignee_id": account_id,
+                        "assignee_name": target
+                    })
+
+                success_count += 1
+                results.append({
+                    "issue_key": key,
+                    "success": True,
+                    "assignee_name": target,
+                    "message": "Reasignado exitosamente en Jira Cloud."
+                })
+
+            except Exception as e:
+                results.append({
+                    "issue_key": key,
+                    "success": False,
+                    "assignee_name": target,
+                    "message": str(e)
+                })
+
+    return {
+        "total_requested": len(payload.assignments),
+        "total_successful": success_count,
+        "results": results
+    }
+

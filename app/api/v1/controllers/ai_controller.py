@@ -285,8 +285,11 @@ def ai_report_insights(
         "generalConclusion": "El equipo se encuentra operando dentro de los márgenes previstos."
     }
     
+    rol_nombre = (current_user.rol.nombre_rol.lower() if current_user and current_user.rol else "")
+    is_leader = "lider" in rol_nombre or "manager" in rol_nombre or "líder" in rol_nombre
+
     report_type = metrics.get('reportType', 'sprint')
-    insights = generate_report_insights(metrics, fallback_insights, report_type)
+    insights = generate_report_insights(metrics, fallback_insights, report_type, is_leader=is_leader)
     
     return {
         "status": "success",

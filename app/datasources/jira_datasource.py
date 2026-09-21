@@ -282,6 +282,132 @@ class JiraDatasource:
 
     @staticmethod
     @jira_retry_decorator
+    async def assign_issue(
+        client: httpx.AsyncClient,
+        base_url: str,
+        headers: Dict[str, str],
+        issue_id_or_key: str,
+        account_id: str
+    ) -> Any:
+        """Asigna un ticket a un usuario en Jira Cloud mediante PUT /issue/{key}/assignee."""
+        payload = {"accountId": account_id} if account_id else {"accountId": None}
+        res = await client.put(f"{base_url}/issue/{issue_id_or_key}/assignee", headers=headers, json=payload)
+        
+        if res.status_code in (401, 403) and ("scope" in res.text.lower() or "unauthorized" in res.text.lower()):
+            try:
+                sys_url, sys_headers = JiraDatasource.get_system_credentials()
+                res_sys = await client.put(f"{sys_url}/issue/{issue_id_or_key}/assignee", headers=sys_headers, json=payload)
+                if res_sys.status_code in (200, 204):
+                    return {"status": "success", "status_code": res_sys.status_code}
+                elif res_sys.status_code not in (429, 502, 503, 504):
+                    raise Exception(f"Jira rechazó la reasignación (HTTP {res_sys.status_code}): {res_sys.text}")
+            except Exception as e:
+                if not isinstance(e, JiraTransientError):
+                    raise e
+
+        if res.status_code in (429, 502, 503, 504):
+            raise JiraTransientError(f"Error efímero al reasignar ticket en Jira ({res.status_code})")
+        if res.status_code not in (200, 204):
+            raise Exception(f"Jira rechazó la reasignación (HTTP {res.status_code}): {res.text}")
+        return {"status": "success", "status_code": res.status_code}
+
+    @staticmethod
+    @jira_retry_decorator
+    async def search_assignable_user(
+        client: httpx.AsyncClient,
+        base_url: str,
+        headers: Dict[str, str],
+        query: str,
+        project_key: str = None
+    ) -> Any:
+        """Busca usuarios asignables en Jira Cloud por nombre o email para obtener su accountId."""
+        url = f"{base_url}/user/search?query={query}"
+        if project_key:
+            url = f"{base_url}/user/assignable/search?project={project_key}&query={query}"
+            
+        res = await client.get(url, headers=headers)
+        if res.status_code in (401, 403):
+            try:
+                sys_url, sys_headers = JiraDatasource.get_system_credentials()
+                sys_url_full = f"{sys_url}/user/search?query={query}"
+                if project_key:
+                    sys_url_full = f"{sys_url}/user/assignable/search?project={project_key}&query={query}"
+                res_sys = await client.get(sys_url_full, headers=sys_headers)
+                if res_sys.status_code == 200:
+                    return res_sys.json()
+            except Exception:
+                pass
+        if res.status_code in (429, 502, 503, 504):
+            raise JiraTransientError(f"Error efímero al buscar usuario en Jira ({res.status_code})")
+        if res.status_code != 200:
+            return []
+        return res.json()
+
+    @staticmethod
+    @jira_retry_decorator
+    async def assign_issue(
+        client: httpx.AsyncClient,
+        base_url: str,
+        headers: Dict[str, str],
+        issue_id_or_key: str,
+        account_id: str
+    ) -> Any:
+        """Asigna un ticket a un usuario en Jira Cloud mediante PUT /issue/{key}/assignee."""
+        payload = {"accountId": account_id} if account_id else {"accountId": None}
+        res = await client.put(f"{base_url}/issue/{issue_id_or_key}/assignee", headers=headers, json=payload)
+        
+        if res.status_code in (401, 403) and ("scope" in res.text.lower() or "unauthorized" in res.text.lower()):
+            try:
+                sys_url, sys_headers = JiraDatasource.get_system_credentials()
+                res_sys = await client.put(f"{sys_url}/issue/{issue_id_or_key}/assignee", headers=sys_headers, json=payload)
+                if res_sys.status_code in (200, 204):
+                    return {"status": "success", "status_code": res_sys.status_code}
+                elif res_sys.status_code not in (429, 502, 503, 504):
+                    raise Exception(f"Jira rechazó la reasignación (HTTP {res_sys.status_code}): {res_sys.text}")
+            except Exception as e:
+                if not isinstance(e, JiraTransientError):
+                    raise e
+
+        if res.status_code in (429, 502, 503, 504):
+            raise JiraTransientError(f"Error efímero al reasignar ticket en Jira ({res.status_code})")
+        if res.status_code not in (200, 204):
+            raise Exception(f"Jira rechazó la reasignación (HTTP {res.status_code}): {res.text}")
+        return {"status": "success", "status_code": res.status_code}
+
+    @staticmethod
+    @jira_retry_decorator
+    async def search_assignable_user(
+        client: httpx.AsyncClient,
+        base_url: str,
+        headers: Dict[str, str],
+        query: str,
+        project_key: str = None
+    ) -> Any:
+        """Busca usuarios asignables en Jira Cloud por nombre o email para obtener su accountId."""
+        url = f"{base_url}/user/search?query={query}"
+        if project_key:
+            url = f"{base_url}/user/assignable/search?project={project_key}&query={query}"
+            
+        res = await client.get(url, headers=headers)
+        if res.status_code in (401, 403):
+            try:
+                sys_url, sys_headers = JiraDatasource.get_system_credentials()
+                sys_url_full = f"{sys_url}/user/search?query={query}"
+                if project_key:
+                    sys_url_full = f"{sys_url}/user/assignable/search?project={project_key}&query={query}"
+                res_sys = await client.get(sys_url_full, headers=sys_headers)
+                if res_sys.status_code == 200:
+                    return res_sys.json()
+            except Exception:
+                pass
+        if res.status_code in (429, 502, 503, 504):
+            raise JiraTransientError(f"Error efímero al buscar usuario en Jira ({res.status_code})")
+        if res.status_code != 200:
+            return []
+        return res.json()
+
+    @staticmethod
+    @jira_retry_decorator
     async def fetch_issue_details(
         client: httpx.AsyncClient,
         base_url: str,
@@ -303,3 +429,5 @@ class JiraDatasource:
         if res.status_code != 200:
             raise Exception(f"Error al consultar issue '{issue_id_or_key}' en Jira (HTTP {res.status_code}): {res.text}")
         return res.json()
+
+

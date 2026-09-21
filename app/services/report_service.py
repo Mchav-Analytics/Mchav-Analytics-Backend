@@ -234,7 +234,7 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str, usuario_nombre: str
     avg_cycle_time = round(sum(cycle_times) / max(len(cycle_times), 1), 1) if cycle_times else 2.5
 
     blocked_days = sum([1 for i in issues if (i.status_actual or "").lower() in ["blocked", "bloqueado"]]) * 2
-    bugs_count = len([i for i in issues if (i.tipo_issue or "").lower() in ["bug", "defecto", "incidencia"]])
+    bugs_count = len([i for i in issues if (getattr(i, 'issue_type', getattr(i, 'tipo_issue', '')) or "").lower() in ["bug", "defecto", "incidencia"]])
 
     p50 = avg_cycle_time if avg_cycle_time > 0 else 2.5
     p85 = round(p50 * 1.5, 1)
@@ -311,7 +311,7 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str, usuario_nombre: str
     pdf.set_text_color(36, 59, 103)
     pdf.cell(180, 10, sanitize_text("INFORME EJECUTIVO DE RENDIMIENTO"), 0, 1, 'C')
 
-    pdf.set_font('Helvetica', 'M', 10)
+    pdf.set_font('Helvetica', '', 10)
     pdf.set_text_color(100, 116, 139)
     pdf.cell(180, 6, sanitize_text("Analisis de desempeno, flujo y predictibilidad"), 0, 1, 'C')
 

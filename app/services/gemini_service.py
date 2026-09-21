@@ -422,11 +422,33 @@ LAS 3 SECCIONES A DESARROLLAR (Debes incluir EXACTAMENTE estas 3 en este orden):
   - Redacta de 2 a 3 párrafos de conclusiones ejecutivas sobre la salud de estos proyectos, cuellos de botella observados y recomendaciones de mejora estructural.
 """
 
-def generate_report_insights(metrics: dict, fallback: dict, report_type: str = "sprint") -> str:
+def generate_report_insights(metrics: dict, fallback: dict, report_type: str = "sprint", is_leader: bool = False) -> str:
     if not is_gemini_configured():
         return _get_fallback_insights(report_type)
 
-    if report_type == "general":
+    if is_leader:
+        v = metrics.get("velocity", 0)
+        t = metrics.get("throughput", 0)
+        ct = metrics.get("cycleTime", 0)
+        bd = metrics.get("blockedDays", 0)
+        bugs = metrics.get("bugs", 0)
+        scope = metrics.get("scope", 0)
+        health = metrics.get("sprintHealth", 0)
+        p50 = metrics.get("p50", 0)
+        p85 = metrics.get("p85", 0)
+        p95 = metrics.get("p95", 0)
+        planned = metrics.get("planned", 0)
+        pct = metrics.get("completionPct", 0)
+
+        if report_type == "general":
+            prompt = _build_lider_general_prompt(metrics)
+        elif report_type == "desarrollador":
+            prompt = _build_lider_desarrollador_prompt(metrics, v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
+        elif report_type == "proyecto":
+            prompt = _build_lider_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
+        else:
+            prompt = _build_lider_sprint_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
+    elif report_type == "general":
         prompt = _build_general_prompt(metrics)
     elif report_type == "desarrollador":
         v = metrics.get("velocity", 0)
@@ -476,6 +498,112 @@ def generate_report_insights(metrics: dict, fallback: dict, report_type: str = "
         return reply
 
     return _get_fallback_insights(report_type)
+
+def _build_lider_sprint_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
+    spillover = max(0, planned - v)
+    return f"""
+Actúa como Nubi IA, Asistente Analítico del Líder Técnico y Facilitador Ágil.
+Analiza el sprint con los siguientes datos empíricos:
+Velocidad entregada: {v} SP (de {planned} SP planificados, {pct}% de cumplimiento). Throughput: {t} tickets cerrados. Stories/tareas en deuda (Spillover): {spillover} SP.
+Cycle Time medio: {ct} días hábiles (descontando fines de semana y festivos). Bloqueos acumulados: {bd} días. Defectos: {bugs} bugs. Salud del Sprint: {health}/100.
+
+REGLAS OBLIGATORIAS DE TONO Y ESTILO:
+1. Utiliza un tono estrictamente constructivo, técnico y facilitador de equipo.
+2. PROHIBIDO usar jerga imprecisa como 'con creces'. Reemplázala por porcentajes exactos e indicadores cuantitativos.
+3. PROHIBIDO invocar 'intervención gerencial', 'intervención ejecutiva' o palabras que infundan temor o nerviosismo en el equipo.
+4. Integra referencias directas a las gráficas (ejemplo: 'Como se observa en la banda verde/azul del Diagrama de Flujo CFD...').
+
+Estructura el informe narrativo en 4 secciones continuas:
+
+# 01 — DIAGNÓSTICO DE SALUD Y AVANCE LOGRADO
+  - Describe el avance del sprint: salud ({health}/100), {v} SP completados ({pct}% del compromiso) y {t} tickets entregados frente a {spillover} SP que quedaron en deuda.
+
+# 02 — EVOLUCIÓN DEL COMPROMISO Y METODOLOGÍA
+  - Analiza cómo evolucionó el ritmo de entrega durante los días hábiles del sprint.
+
+# 03 — CUELLOS DE BOTELLA Y LOCALIZACIÓN DEL PROBLEMA
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_FLUJO]
+  - Analiza las causas de los {bd} días bloqueados y la concentración de tareas en revisión en el CFD, cuantificando las horas de retraso estimadas y el impacto de la multitarea.
+
+# 04 — GUÍA DE ACOMPAÑAMIENTO Y PLAN TÁCTICO DEL LÍDER
+  - Proporciona 3 acciones prácticas para que el Líder Técnico y el equipo rebalanceen el WIP y remuevan bloqueos en el próximo sprint.
+"""
+
+def _build_lider_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
+    spillover = max(0, planned - v)
+    return f"""
+Actúa como Nubi IA, Asistente Analítico del Líder Técnico y Facilitador Ágil.
+Analiza el proyecto con los datos:
+Velocidad entregada: {v} SP. Throughput: {t} tickets resueltos. Tareas en deuda: {spillover} SP. Cycle Time medio: {ct} días hábiles (descontando fines de semana). Días bloqueados: {bd}. Bugs: {bugs}.
+
+REGLAS OBLIGATORIAS DE TONO Y ESTILO:
+1. Utiliza un tono constructivo, de soporte y enfocado en la mejora continua del equipo.
+2. PROHIBIDO usar palabras vagas como 'con creces' o apelaciones a 'intervención gerencial/ejecutiva'.
+3. Apóyate en métricas cuantitativas precisas y citas directas a las gráficas.
+
+Estructura el informe narrativo en 4 secciones:
+
+# 01 — CONTEXTO OPERATIVO Y SALUD DEL PROYECTO
+  - Resumen del periodo: Sprints evaluados, {t} tareas resueltas, {v} SP completados y {spillover} SP pendientes.
+
+# 02 — TENDENCIA DE VELOCIDAD E HISTÓRICO DE ENTREGAS
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_VELOCIDAD]
+  - Cita la gráfica de velocidad explicando la evolución del rendimiento por sprint y la estabilidad de entregas.
+
+# 03 — DIAGNÓSTICO DE FLUJO Y PUNTOS DE FRICCIÓN
+  - Analiza la acumulación de trabajo en progreso (WIP), los {bd} días bloqueados y el impacto del trabajo simultáneo por desarrollador.
+
+# 04 — HOJA DE RUTA Y ACCIONES TÁCTICAS DEL LÍDER
+  - 3 recomendaciones prácticas para optimizar el ciclo de vida y proteger la capacidad del equipo.
+"""
+
+def _build_lider_desarrollador_prompt(metrics, v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
+    return f"""
+Actúa como Nubi IA, Asistente Analítico del Líder Técnico.
+Analiza la actividad del desarrollador con los datos:
+Story Points completados: {v} SP. Tareas cerradas: {t}. Cycle Time personal: {ct} días hábiles. Días de bloqueo: {bd}. Bugs reabiertos: {bugs}.
+
+REGLAS DE TONO: Tono positivo, de coaching técnico y crecimiento profesional. Cero lenguaje punitivo o jerárquico.
+
+Estructura la evaluación narrativa en 4 secciones:
+
+# 01 — PERFIL Y CARGA DE TRABAJO ACTUAL
+  - Resumen de entregas cerradas ({t} tareas, {v} SP) y nivel de enfoque en el periodo.
+
+# 02 — RITMO DE ENTREGA Y EVOLUCIÓN
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_VELOCIDAD]
+  - Analiza la estabilidad de velocidad individual a lo largo de los sprints.
+
+# 03 — IDENTIFICACIÓN DE IMPEDIMENTOS Y MULTITAREA
+  - Evalúa la presencia de sobrecarga por WIP simultáneo, cuellos de botella en QA o días bloqueados ({bd} días).
+
+# 04 — PLAN DE ACOMPAÑAMIENTO Y MENTORÍA TÉCNICA
+  - Recomendaciones para el Líder Técnico sobre cómo apoyar al desarrollador, despejar bloqueos y balancear sus asignaciones.
+"""
+
+def _build_lider_general_prompt(metrics):
+    return f"""
+Actúa como Nubi IA, Asistente Analítico del Líder Técnico.
+Analiza el portafolio consolidado del Líder con los datos:
+Velocidad total: {metrics.get('velocity', 0)} SP. Throughput acumulado: {metrics.get('throughput', 0)} tickets. Cycle Time medio: {metrics.get('cycleTime', 0)} días hábiles. Bloqueos acumulados: {metrics.get('blockedDays', 0)} días.
+
+REGLAS DE TONO: Tono constructivo de coordinación táctica multi-proyecto.
+
+Estructura el informe en 4 secciones:
+
+# 01 — VISIÓN CONSOLIDADA DEL PORTAFOLIO DE PROYECTOS
+  - Resumen del estado global de los proyectos asignados y volumen acumulado de entregas.
+
+# 02 — DESEMPEÑO COMPARATIVO DE LOS PROYECTOS
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_PORTAFOLIO_VELOCIDAD]
+  - Analiza la velocidad y el ritmo comparativo entre proyectos.
+
+# 03 — ANÁLISIS DE IMPEDIMENTOS Y BALANCE DE CAPACIDAD
+  - Identifica cuellos de botella y concentración de bloqueos por proyecto.
+
+# 04 — PRIORIZACIÓN SEMANAL Y ACCIONES DEL LÍDER
+  - Guía táctica para redistribuir capacidad del equipo y mitigar riesgos en la próxima semana.
+"""
 
 def _get_fallback_insights(report_type: str) -> str:
     if report_type == "general":
