@@ -8,29 +8,11 @@ from datetime import datetime, timezone, timedelta
 import app.models as models
 from app.services.kpi import get_issue_cycle_time_days
 
+from app.services.jira_normalizer import normalize_status
+
 def get_base_status(status_name: str, db: Session = None, project_id: str = None) -> str:
     """Retorna la categoría base ('IN_PROGRESS', 'DONE', 'TODO') para un nombre de estado en Jira."""
-    if not status_name:
-        return "TODO"
-
-    # Si hay mapeos configurados en la BD, usarlos
-    if db and project_id:
-        try:
-            mapping = db.query(models.MapeoEstado).filter(
-                models.MapeoEstado.id_proyecto == project_id,
-                func.lower(models.MapeoEstado.estado_jira) == status_name.lower().strip()
-            ).first()
-            if mapping:
-                return mapping.estado_base
-        except Exception:
-            pass
-
-    st = status_name.lower().strip()
-    if st in ("done", "listo", "resuelto", "resolved", "cerrado", "closed", "finalizado"):
-        return "DONE"
-    if st in ("in progress", "en progreso", "desarrollo", "in development", "doing", "active", "en desarrollo", "en revisión", "in review", "en curso", "en testing", "en pruebas"):
-        return "IN_PROGRESS"
-    return "TODO"
+    return normalize_status(status_name, db, project_id)
 
 def get_developer_scorecard_data(db: Session, proyecto_id: str, email_or_assignee_id: str = None):
     """

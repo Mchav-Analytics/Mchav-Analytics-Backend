@@ -87,31 +87,9 @@ async def get_jira_metrics(
     if cached_data:
         return cached_data
     
-    # 2. Vía rápida: Si existen datos localmente en BD, calcular métricas en milisegundos (< 5ms)
+    # 2. Consultar en paralelo a la API REST externa de Jira (con auto-fallback a BD si Jira falla)
     try:
-        db_projects = db.query(models.Proyecto).count()
-        db_issues = db.query(models.Issue).count()
-        if db_projects > 0 or db_issues > 0:
-            done_cnt = db.query(models.Issue).filter(models.Issue.status_actual.ilike("%done%")).count()
-            progress_cnt = db.query(models.Issue).filter(models.Issue.status_actual.ilike("%progress%")).count()
-            critical_cnt = db.query(models.Issue).filter(
-                models.Issue.issue_type.ilike("%bug%"),
-                models.Issue.priority.ilike("%high%")
-            ).count()
-            result_data = {
-                "active_projects": db_projects,
-                "completed_tickets": done_cnt,
-                "in_progress_tickets": progress_cnt,
-                "critical_bugs": critical_cnt
-            }
-            metrics_cache.set(cache_key, result_data)
-            return result_data
-    except Exception:
-        pass
-    
-    # 3. Vía fallback: Consultar en paralelo a la API REST externa de Jira
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             async def _search_jql(jql_query: str):
                 res = await client.get(f"{base_jira_url}/search/jql?jql={jql_query}&maxResults=0", headers=headers)
                 if res.status_code == 200:
@@ -142,13 +120,40 @@ async def get_jira_metrics(
                 "critical_bugs": bugs_data.get("total", 0)
             }
             
-            # Guardar en caché por 300 segundos (5 minutos)
             metrics_cache.set(cache_key, result_data)
             return result_data
-        except Exception as e:
-            if isinstance(e, HTTPException):
-                raise e
-            raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        # Fallback a base de datos local si falla la conexión remota con Jira
+        try:
+            db_projects = db.query(models.Proyecto).count()
+            db_issues = db.query(models.Issue).count()
+            if db_projects > 0 or db_issues > 0:
+                from sqlalchemy import func
+                from app.services.jira_normalizer import DONE_STATUSES, IN_PROGRESS_STATUSES, BUG_TYPES
+
+                done_cnt = db.query(models.Issue).filter(
+                    func.lower(models.Issue.status_actual).in_(DONE_STATUSES)
+                ).count()
+                progress_cnt = db.query(models.Issue).filter(
+                    func.lower(models.Issue.status_actual).in_(IN_PROGRESS_STATUSES)
+                ).count()
+                critical_cnt = db.query(models.Issue).filter(
+                    func.lower(models.Issue.issue_type).in_(BUG_TYPES),
+                    models.Issue.priority.ilike("%high%")
+                ).count()
+                result_data = {
+                    "active_projects": db_projects,
+                    "completed_tickets": done_cnt,
+                    "in_progress_tickets": progress_cnt,
+                    "critical_bugs": critical_cnt
+                }
+                metrics_cache.set(cache_key, result_data)
+                return result_data
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post(
     "/sync",
@@ -492,7 +497,7 @@ async def execute_issue_transition(
         
         # 2. Ejecutar la transición en Jira Cloud
         try:
-            await JiraDatasource.execute_issue_transition(client, base_jira_url, headers, issue_key, trans_id_to_exec)
+            await JiraDatasource.post_issue_transition(client, base_jira_url, headers, issue_key, trans_id_to_exec)
         except Exception as exec_err:
             raise HTTPException(status_code=502, detail=f"Jira rechazó la transición: {str(exec_err)}")
         
@@ -521,8 +526,9 @@ async def execute_issue_transition(
                     
         return {
             "success": True,
+            "status": "success",
+            "new_status": updated_status,
             "issue_key": issue_key,
-            "status": updated_status,
             "message": f"Estado de {issue_key} actualizado a '{updated_status}' en Jira Cloud."
         }
 

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import app.models as models
 from app.repositories import project_repo, mapping_repo, issue_repo, kpi_repo, sprint_repo
 
-def get_issue_cycle_time_days(issue: models.Issue, in_progress_statuses: set[str] = None) -> float:
+def get_issue_cycle_time_days(issue: models.Issue, in_progress_statuses: set[str] = None, exclude_weekends: bool = False) -> float:
     """
     Calcula el tiempo de ciclo (Cycle Time) en días flotantes para un ticket individual resuelto.
     - Identifica la fecha exacta de la primera transición hacia un estado 'En Progreso' / 'In Progress'.
@@ -20,14 +20,14 @@ def get_issue_cycle_time_days(issue: models.Issue, in_progress_statuses: set[str
         
     # Nombres de estado por defecto si no se especifican mapeos personalizados
     if not in_progress_statuses:
-        in_progress_statuses = {"in progress", "en progreso", "desarrollo", "in development", "doing", "active", "en desarrollo"}
+        in_progress_statuses = {"in progress", "en progreso", "desarrollo", "in development", "doing", "active", "en desarrollo", "en curso"}
         
     # Ordenar transiciones cronológicamente por fecha de cambio
     transitions = sorted(issue.transiciones, key=lambda t: t.fecha_cambio)
     
     first_progress_date = None
     for t in transitions:
-        if t.estado_nuevo and t.estado_nuevo.lower() in in_progress_statuses:
+        if t.estado_nuevo and t.estado_nuevo.lower().strip() in in_progress_statuses:
             first_progress_date = t.fecha_cambio
             break
             
@@ -38,8 +38,8 @@ def get_issue_cycle_time_days(issue: models.Issue, in_progress_statuses: set[str
         return 0.0
         
     total_days = (issue.resolved_at - start_date).total_seconds() / 86400.0
-    if total_days <= 1.0:
-        return round(total_days, 1)
+    if not exclude_weekends or total_days <= 1.0:
+        return round(max(0.0, total_days), 1)
 
     # Descontar fines de semana (Lunes=0, ..., Domingo=6)
     cur = start_date

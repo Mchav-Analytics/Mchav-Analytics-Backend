@@ -199,7 +199,13 @@ async def get_project_kpis_issues_detail(
     if metric_type in ("lead_time", "cycle_time", "throughput"):
         query = query.filter(models.Issue.resolved_at.isnot(None))
     elif metric_type == "bugs":
-        query = query.filter(models.Issue.status_actual.ilike("%bug%") | models.Issue.summary.ilike("%bug%"))
+        query = query.filter(
+            models.Issue.issue_type.ilike("%bug%") |
+            models.Issue.issue_type.ilike("%error%") |
+            models.Issue.issue_type.ilike("%defecto%") |
+            models.Issue.summary.ilike("%bug%") |
+            models.Issue.summary.ilike("%error%")
+        )
 
     if fecha_inicio:
         try:
@@ -218,8 +224,9 @@ async def get_project_kpis_issues_detail(
     total_count = query.count()
     issues = query.order_by(models.Issue.created_at.desc()).offset(offset).limit(limit).all()
 
+    from app.services.jira_normalizer import IN_PROGRESS_STATUSES
     mappings = mapping_repo.get_by_project_and_base(db, proyecto_id, "IN_PROGRESS")
-    in_prog_statuses = {m.estado_jira.lower() for m in mappings} if mappings else {"in progress", "en progreso", "desarrollo", "in development", "doing", "active"}
+    in_prog_statuses = {m.estado_jira.lower().strip() for m in mappings} if mappings else IN_PROGRESS_STATUSES
 
     result = []
     for issue in issues:
@@ -301,12 +308,23 @@ async def get_project_sprints(
     
     result = []
     for sp in sprints:
-        sp_id = sp.id_sprint
+        sp_id = sp.get("id_sprint") if isinstance(sp, dict) else getattr(sp, "id_sprint", None)
+        id_proj = sp.get("id_proyecto") if isinstance(sp, dict) else getattr(sp, "id_proyecto", None)
+        sp_name = sp.get("nombre") if isinstance(sp, dict) else getattr(sp, "nombre", None)
+        sp_estado = sp.get("estado") if isinstance(sp, dict) else getattr(sp, "estado", None)
         
+        fi = sp.get("fecha_inicio") if isinstance(sp, dict) else getattr(sp, "fecha_inicio", None)
+        ff = sp.get("fecha_fin") if isinstance(sp, dict) else getattr(sp, "fecha_fin", None)
+        ffz = sp.get("fecha_finalizacion") if isinstance(sp, dict) else getattr(sp, "fecha_finalizacion", None)
+
+        fi_str = fi.isoformat() if hasattr(fi, 'isoformat') else (str(fi) if fi else None)
+        ff_str = ff.isoformat() if hasattr(ff, 'isoformat') else (str(ff) if ff else None)
+        ffz_str = ffz.isoformat() if hasattr(ffz, 'isoformat') else (str(ffz) if ffz else None)
+
         # Obtener todos los issues asignados a este sprint
         issues_in_sprint = db.query(models.Issue).filter(
             models.Issue.id_sprint == sp_id
-        ).all()
+        ).all() if sp_id else []
         
         sp_comprometidos = 0.0
         sp_completados = 0.0
@@ -320,13 +338,13 @@ async def get_project_sprints(
                 sp_completados += pts
         
         result.append({
-            "id_sprint": sp.id_sprint,
-            "id_proyecto": sp.id_proyecto,
-            "nombre": sp.nombre,
-            "estado": sp.estado,
-            "fecha_inicio": sp.fecha_inicio.isoformat() if sp.fecha_inicio else None,
-            "fecha_fin": sp.fecha_fin.isoformat() if sp.fecha_fin else None,
-            "fecha_finalizacion": sp.fecha_finalizacion.isoformat() if sp.fecha_finalizacion else None,
+            "id_sprint": sp_id,
+            "id_proyecto": id_proj,
+            "nombre": sp_name,
+            "estado": sp_estado,
+            "fecha_inicio": fi_str,
+            "fecha_fin": ff_str,
+            "fecha_finalizacion": ffz_str,
             "sp_comprometidos": round(sp_comprometidos, 1),
             "sp_completados": round(sp_completados, 1),
             "total_issues": len(issues_in_sprint)

@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 import app.models as models
 from app.services.kpi import get_issue_cycle_time_days
+from app.services.jira_normalizer import is_done, is_in_progress
+from app.services.project_resolver import resolve_project_id
 
 def calculate_sprint_health(
     db: Session,
@@ -23,6 +25,7 @@ def calculate_sprint_health(
     - Sprint Health Score (0-100 pts)
     - Detección de cuellos de botella y alertas de Scope Creep.
     """
+    proyecto_id = resolve_project_id(db, proyecto_id)
     # 1. Obtener los tickets del proyecto/sprint
     issues = []
     sprint_obj = None
@@ -116,24 +119,25 @@ def calculate_sprint_health(
                 if updated > sprint_start_date:
                     tickets_changed += 1
 
-        if st in ("done", "listo", "resuelto", "resolved", "cerrado", "closed"):
+        if is_done(st, db, proyecto_id):
             sp_completed += sp
             if ct > 0:
                 active_dev_days += ct * 0.75
                 waiting_queue_days += ct * 0.25
                 bottleneck_stages["Desarrollo Activo"] += ct * 0.75
                 bottleneck_stages["Pruebas de Calidad (QA)"] += ct * 0.25
-        elif st in ("in progress", "en progreso", "desarrollo", "in development", "doing"):
+        elif is_in_progress(st, db, proyecto_id) and st not in ("in review", "en revisión", "en revision", "review", "qa", "en pruebas"):
             if ct > 0:
                 active_dev_days += ct * 0.8
                 waiting_queue_days += ct * 0.2
                 bottleneck_stages["Desarrollo Activo"] += ct * 0.8
                 bottleneck_stages["Revisión de Código"] += ct * 0.2
-        elif st in ("in review", "en revisión", "review"):
+        elif st in ("in review", "en revisión", "en revision", "review", "qa", "en pruebas"):
             if ct > 0:
                 active_dev_days += ct * 0.3
                 waiting_queue_days += ct * 0.7
                 bottleneck_stages["Revisión de Código"] += ct * 0.7
+                bottleneck_stages["Pruebas de Calidad (QA)"] += ct * 0.3
         else:  # To Do / Backlog — carryover candidate
             sp_carryover += sp
             waiting_queue_days += 1.0
@@ -256,7 +260,7 @@ def _empty_health_response(proyecto_id: str, sprint_id: str = None) -> Dict[str,
         "proyecto_id": proyecto_id,
         "sprint_id": sprint_id,
         "health_score": 78,
-        "diagnostico": "ESTABLE",
+        "diagnostico": "ACEPTABLE",
         "diagnostico_label": "Modo Inicial — Sincronice con Jira para actualizar datos en vivo",
         "color": "emerald",
         "metrics": {

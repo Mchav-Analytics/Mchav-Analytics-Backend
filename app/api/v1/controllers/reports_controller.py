@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.auth import User
 from app.services.report_service import generate_pdf_report_bytes
+from app.services.project_resolver import resolve_project_id
 from app.api.v1 import deps
 
 router = APIRouter()
@@ -34,7 +35,8 @@ async def download_pdf_report(
         user_name = "Valka Hoyos (Administrador)"
 
     try:
-        pdf_bytes = generate_pdf_report_bytes(db, proyecto_id, usuario_nombre=user_name)
+        target_pid = resolve_project_id(db, proyecto_id)
+        pdf_bytes = generate_pdf_report_bytes(db, target_pid, usuario_nombre=user_name)
         
         filename = f"reporte_kpis_{proyecto_id}.pdf"
         headers = {

@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
 import app.models as models
 from app.services.dev_metrics_service import get_developer_scorecard_data
+from app.services.project_resolver import resolve_project_id
 
 def calculate_performance_score(
     tickets_done: int,
@@ -125,6 +126,7 @@ def calculate_team_performance_matrix(
     - Asigna el cuadrante operativo
     - Genera ranking con posiciones y explicaciones claras ("El porqué de las cosas")
     """
+    proyecto_id = resolve_project_id(db, proyecto_id)
     # 1. Obtener desarrolladores únicos del proyecto
     dev_users = []
     try:

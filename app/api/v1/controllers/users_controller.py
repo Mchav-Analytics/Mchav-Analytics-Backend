@@ -50,11 +50,21 @@ class UserDetailResponse(BaseModel):
 
 def _verify_admin(user: User):
     """Auxiliar para garantizar que el usuario solicitante posea el rol de Administrador."""
-    rol_nombre = user.rol.nombre_rol.lower() if user.rol else ""
+    rol_nombre = user.rol.nombre_rol.lower().strip() if user.rol and user.rol.nombre_rol else ""
     if rol_nombre != "administrador":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Operación permitida únicamente para administradores del sistema."
+        )
+
+def _verify_management_or_admin(user: User):
+    """Auxiliar para permitir lectura a administradores y roles de gestión (Manager, Planificador, Líder Técnico)."""
+    rol_nombre = user.rol.nombre_rol.lower().strip() if user.rol and user.rol.nombre_rol else ""
+    allowed = ["administrador", "admin", "manager", "planificador", "líder técnico", "lider tecnico"]
+    if not any(r in rol_nombre for r in allowed):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operación permitida únicamente para roles de gestión o administradores."
         )
 
 @router.get(
@@ -68,7 +78,7 @@ async def list_users(
     db: Session = Depends(get_db),
     current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
-    _verify_admin(current_user)
+    _verify_management_or_admin(current_user)
     users = db.query(User).all()
     result = []
     for u in users:
@@ -163,6 +173,8 @@ async def update_user_role(
             role = db.query(Role).filter(Role.nombre_rol == "Planificador").first()
         elif "DEV" in raw_role_str or "DESARR" in raw_role_str:
             role = db.query(Role).filter(Role.nombre_rol == "Desarrollador").first()
+        elif "USUARIO" in raw_role_str or "USER" in raw_role_str:
+            role = db.query(Role).filter(Role.nombre_rol == "Usuario").first()
 
     if not role:
         raise HTTPException(status_code=400, detail="El rol especificado no existe.")
@@ -189,7 +201,7 @@ async def get_user_projects(
     db: Session = Depends(get_db),
     current_user: User = Security(get_current_user, scopes=["jira:read"])
 ):
-    _verify_admin(current_user)
+    _verify_management_or_admin(current_user)
     
     target_user = db.query(User).filter(User.id_usuario == id_usuario).first()
     if not target_user:
@@ -261,7 +273,7 @@ def get_user_logs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    _verify_admin(current_user)
+    _verify_management_or_admin(current_user)
     
     # Primero buscamos el email del usuario
     target_user = db.query(User).filter(User.id_usuario == user_id).first()

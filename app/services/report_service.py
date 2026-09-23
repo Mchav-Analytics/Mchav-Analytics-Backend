@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import app.models as models
 from app.repositories import project_repo, kpi_repo, sprint_repo, issue_repo
 from app.services.sprint_health_service import calculate_sprint_health, get_issue_cycle_time_days
+from app.services.jira_normalizer import is_done, is_bug, DONE_STATUSES, BLOCKED_STATUSES
 
 
 def sanitize_text(text: str) -> str:
@@ -223,18 +224,18 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str, usuario_nombre: str
         issues = q.all()
 
     total_issues = len(issues)
-    velocity = sum([float(i.story_points or 0) for i in issues if (i.status_actual or "").lower() in ["done", "completado", "cerrado", "resolved"]])
+    velocity = sum([float(i.story_points or 0) for i in issues if is_done(i.status_actual, db, proyecto_id)])
     if velocity == 0 and total_issues > 0:
-        velocity = float(len([i for i in issues if (i.status_actual or "").lower() in ["done", "completado", "cerrado", "resolved"]]))
+        velocity = float(len([i for i in issues if is_done(i.status_actual, db, proyecto_id)]))
 
-    throughput = len([i for i in issues if (i.status_actual or "").lower() in ["done", "completado", "cerrado", "resolved"]]) or max(total_issues, 12)
+    throughput = len([i for i in issues if is_done(i.status_actual, db, proyecto_id)]) or max(total_issues, 12)
     velocity = velocity if velocity > 0 else 45.0
 
     cycle_times = [get_issue_cycle_time_days(i) for i in issues if get_issue_cycle_time_days(i) > 0]
     avg_cycle_time = round(sum(cycle_times) / max(len(cycle_times), 1), 1) if cycle_times else 2.5
 
-    blocked_days = sum([1 for i in issues if (i.status_actual or "").lower() in ["blocked", "bloqueado"]]) * 2
-    bugs_count = len([i for i in issues if (getattr(i, 'issue_type', getattr(i, 'tipo_issue', '')) or "").lower() in ["bug", "defecto", "incidencia"]])
+    blocked_days = sum([1 for i in issues if (i.status_actual or "").lower().strip() in BLOCKED_STATUSES]) * 2
+    bugs_count = len([i for i in issues if is_bug(getattr(i, 'issue_type', getattr(i, 'tipo_issue', '')), getattr(i, 'summary', ''))])
 
     p50 = avg_cycle_time if avg_cycle_time > 0 else 2.5
     p85 = round(p50 * 1.5, 1)
