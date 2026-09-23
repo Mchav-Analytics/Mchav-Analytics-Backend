@@ -173,6 +173,7 @@ origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if FRONTEND_URL == "*" else origins,
+    allow_origin_regex=r"https?://.*\.nip\.io(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
