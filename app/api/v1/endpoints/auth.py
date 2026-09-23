@@ -140,6 +140,8 @@ async def callback(code: str, state: str, db: Session = Depends(get_db)):
     u_data = await auth_service.exchange_code_for_user_profile(code)
     
     user = user_repo.get_by_jira_account_id(db, u_data["jira_account_id"])
+    if not user and u_data.get("email"):
+        user = user_repo.get_by_email(db, u_data["email"])
     if not user:
         user = user_repo.create(db, obj_in=u_data)
     else:

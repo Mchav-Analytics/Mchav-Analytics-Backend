@@ -177,6 +177,8 @@ async def callback(code: str = None, state: str = None, error: str = None, respo
         return RedirectResponse(url=f"{FRONTEND_URL}/?login=error", status_code=302)
     
     user = user_repo.get_by_jira_account_id(db, u_data["jira_account_id"])
+    if not user and u_data.get("email"):
+        user = user_repo.get_by_email(db, u_data["email"])
     rol_default = db.query(Role).filter(Role.nombre_rol == "Usuario").first()
     if not rol_default:
         rol_default = db.query(Role).filter(Role.nombre_rol == "Desarrollador").first()
