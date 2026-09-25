@@ -169,7 +169,7 @@ async def trigger_jira_sync(
     user_id = deps.get_current_user_id(request)
     user = deps.check_user_exists(db, user_id)
     
-    if log_repo.has_running_sync(db):
+    if not log_repo.try_acquire_sync_lock(db):
         if wait:
             # Esperar activamente hasta 15 segundos a que la sincronización en curso termine
             for _ in range(30):
@@ -229,6 +229,50 @@ async def get_sync_logs(
             limit=limit
         )
     return logs
+
+from pydantic import BaseModel
+class CronTimeUpdate(BaseModel):
+    cron_time: str
+
+@router.put(
+    "/sync/cron",
+    summary="Actualizar horario CRON de sincronización automática"
+)
+async def update_cron_time(
+    payload: CronTimeUpdate,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Actualiza la preferencia de horario (ej: '15:36') para el usuario actual.
+    """
+    user_id = deps.get_current_user_id(request)
+    user = deps.check_user_exists(db, user_id)
+    
+    # Validar formato simple HH:MM
+    import re
+    if not re.match(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', payload.cron_time):
+        raise HTTPException(status_code=400, detail="Formato de hora inválido. Usa HH:MM.")
+        
+    user.cron_sync_time = payload.cron_time
+    db.commit()
+    
+    # Reiniciar o actualizar el scheduler
+    try:
+        from app.core.scheduler import _scheduler, scheduled_sync_job
+        from apscheduler.triggers.cron import CronTrigger
+        if _scheduler and _scheduler.running:
+            hour, minute = payload.cron_time.split(":")
+            _scheduler.add_job(
+                scheduled_sync_job,
+                trigger=CronTrigger(hour=int(hour), minute=int(minute)),
+                id=f"automatic_jira_sync_{user.id_usuario}",
+                replace_existing=True
+            )
+    except Exception as e:
+        print(f"Error reprogramando tarea CRON dinámicamente: {e}")
+        
+    return {"message": "Horario actualizado con éxito", "cron_sync_time": user.cron_sync_time}
 
 @router.post(
     "/webhook",
@@ -698,4 +742,4 @@ async def reassign_issues_bulk(
         "total_successful": success_count,
         "results": results
     }
-
+

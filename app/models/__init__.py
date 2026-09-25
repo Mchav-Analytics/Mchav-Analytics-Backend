@@ -13,7 +13,7 @@ from .auth import Role, User, UserProject
 from .jira import issues_sprints, Proyecto, Sprint, Issue, TransicionEstadoIssue, MapeoEstado
 
 # Modelos del dominio de métricas y auditoría (KPIs Históricos, Logs de Sincronización)
-from .metrics import KpisHistoricos, LogsSincronizacion, KpisDesarrollador, KpisSprintSalud
+from .metrics import KpisHistoricos, LogsSincronizacion, KpisDesarrollador, KpisSprintSalud, SyncLock
 from .alerts import AlertasSistema, SolicitudesAyudaDev
 
 # Lista explícita de símbolos exportados para la importación estilo wildcard ('from app.models import *')
@@ -33,7 +33,8 @@ __all__ = [
     "KpisDesarrollador",
     "KpisSprintSalud",
     "AlertasSistema",
-    "SolicitudesAyudaDev"
+    "SolicitudesAyudaDev",
+    "SyncLock"
 ]
 
 from .issue_history import IssueHistory

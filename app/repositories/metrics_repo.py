@@ -33,9 +33,29 @@ class CRUDLog(CRUDBase[LogsSincronizacion]):
         """Obtiene los logs de sincronización más recientes ordenados descendentemente por fecha de ejecución."""
         return db.query(LogsSincronizacion).order_by(LogsSincronizacion.fecha_ejecucion.desc()).offset(skip).limit(limit).all()
 
+    def try_acquire_sync_lock(self, db: Session, task_name: str = "JIRA_SYNC") -> bool:
+        """Intenta adquirir el candado exclusivo insertando en SyncLock. Retorna True si lo logró."""
+        from sqlalchemy.exc import IntegrityError
+        from app.models.metrics import SyncLock
+        try:
+            db.add(SyncLock(task_name=task_name))
+            db.commit()
+            return True
+        except IntegrityError:
+            db.rollback()
+            return False
+
+    def release_sync_lock(self, db: Session, task_name: str = "JIRA_SYNC"):
+        """Libera el candado exclusivo eliminando el registro de SyncLock."""
+        from app.models.metrics import SyncLock
+        db.query(SyncLock).filter(SyncLock.task_name == task_name).delete()
+        db.commit()
+
     def has_running_sync(self, db: Session) -> bool:
-        """HU-007 CA-03: Retorna True si ya existe una sincronización en proceso ('RUNNING')."""
-        count = db.query(LogsSincronizacion).filter(LogsSincronizacion.resultado == "RUNNING").count()
+        """HU-007 CA-03: Retorna True si ya existe una sincronización en proceso.
+        (Mantenido por retrocompatibilidad visual si se necesita en UI)"""
+        from app.models.metrics import SyncLock
+        count = db.query(SyncLock).filter(SyncLock.task_name == "JIRA_SYNC").count()
         return count > 0
 
     def get_filtered_logs(

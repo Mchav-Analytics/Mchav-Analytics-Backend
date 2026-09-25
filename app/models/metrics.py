@@ -92,3 +92,12 @@ class KpisSprintSalud(Base):
     diagnostico = Column(String(50), default="EXCELENTE")
 
 
+class SyncLock(Base):
+    """
+    Tabla de bloqueo exclusivo (Unique Constraint) para prevenir condiciones de carrera
+    en la sincronización concurrente.
+    Tabla: 'sync_locks'
+    """
+    __tablename__ = "sync_locks"
+
+    task_name = Column(String(50), primary_key=True)

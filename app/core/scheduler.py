@@ -20,8 +20,8 @@ def scheduled_sync_job():
     print("[Cron Scheduler] Verificando bloqueo distribuido para sincronización automática...")
     db = SessionLocal()
     try:
-        # Bloqueo distribuido: Si ya existe un log 'RUNNING', omitir inmediatamente
-        if log_repo.has_running_sync(db):
+        # Bloqueo distribuido: Tabla Exclusiva (Restricción Única)
+        if not log_repo.try_acquire_sync_lock(db):
             print("[Cron Scheduler] Omitiendo ejecución en este nodo: Ya existe una sincronización en proceso en otro nodo/instancia.")
             return
 

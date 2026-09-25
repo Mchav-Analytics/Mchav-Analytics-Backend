@@ -489,6 +489,7 @@ async def async_run_jira_sync(user_id: int, tipo_sincronizacion: str = "MANUAL")
                 "detalle_error": f"{error_msg}\n{traceback_str[:300]}"
             })
     finally:
+        log_repo.release_sync_lock(db)
         db.close()
 
 def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):

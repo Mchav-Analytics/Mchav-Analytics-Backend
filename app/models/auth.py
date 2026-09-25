@@ -75,6 +75,9 @@ class User(Base):
     jira_api_token = Column(Text, nullable=True)       # API Token cifrado/almacenado
     api_token_vinculado = Column(Boolean, nullable=False, default=False)  # Indica si las credenciales fueron verificadas
 
+    # NUEVO: Preferencia de horario para la sincronización automática (ej: "15:36")
+    cron_sync_time = Column(String(10), nullable=True, default="02:00")
+
     # Estampas de tiempo automáticas de creación y última actualización
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
