@@ -12,30 +12,27 @@ from app.services.jira_sync import run_jira_sync
 
 _scheduler = None
 
-def scheduled_sync_job():
+def scheduled_sync_job(user_id: int):
     """
     Job programado por el Scheduler de APScheduler.
-    Busca usuarios activos e invoca la sincronización incremental de Jira en segundo plano con bloqueo distribuido (Item 2).
+    Ejecuta la sincronización incremental para un usuario específico con bloqueo distribuido.
     """
-    print("[Cron Scheduler] Verificando bloqueo distribuido para sincronización automática...")
-    db = SessionLocal()
+    print(f"[Cron Scheduler] Adquiriendo candado y ejecutando job de sincronización para usuario ID {user_id}...")
+    
+    # Enviar petición HTTP al endpoint interno de FastAPI para delegar
+    # la ejecución asíncrona a Starlette BackgroundTasks (evita bug de threading)
+    import httpx
     try:
-        # Bloqueo distribuido: Tabla Exclusiva (Restricción Única)
-        if not log_repo.try_acquire_sync_lock(db):
-            print("[Cron Scheduler] Omitiendo ejecución en este nodo: Ya existe una sincronización en proceso en otro nodo/instancia.")
-            return
-
-        admin_user = db.query(user_repo.model).filter(user_repo.model.activo.is_(True)).first()
-        if admin_user:
-            print(f"[Cron Scheduler] Adquiriendo candado y ejecutando job de sincronización para usuario ID {admin_user.id_usuario}...")
-            asyncio.run(run_jira_sync(admin_user.id_usuario, sync_type="AUTOMATIC"))
-            print("[Cron Scheduler] Sincronización automática distribuida finalizada con éxito.")
+        # Usamos httpx en modo síncrono con Client()
+        with httpx.Client(timeout=5.0) as client:
+            res = client.post(f"http://127.0.0.1:8000/api/v1/jira/sync/internal_cron?user_id={user_id}")
+            
+        if res.status_code == 200:
+            print(f"[Cron Scheduler] Petición de sincronización delegada exitosamente (User {user_id}).")
         else:
-            print("[Cron Scheduler] No se encontró ningún usuario activo para ejecutar el job.")
-    except Exception as e:
-        print(f"[Cron Scheduler] Error en trabajo programado: {e}")
-    finally:
-        db.close()
+            print(f"[Cron Scheduler] Delegación denegada (ej. Sincronización en curso): {res.text}")
+    except Exception as http_err:
+        print(f"[Cron Scheduler] Falló la delegación HTTP: {http_err}")
 
 def scheduled_monthly_reports_job():
     """
@@ -54,17 +51,11 @@ def scheduled_monthly_reports_job():
         db.close()
 
 def start_scheduler():
-    """Inicializa y arranca el planificador de tareas APScheduler."""
+    """Inicializa y arranca el planificador de tareas APScheduler y lee los horarios de la DB."""
     global _scheduler
     if _scheduler is None:
         _scheduler = BackgroundScheduler(daemon=True)
-        # Programar ejecución diaria automática a las 02:00 AM (HU-010 CA-01)
-        _scheduler.add_job(
-            scheduled_sync_job, 
-            trigger=CronTrigger(hour=2, minute=0), 
-            id="automatic_jira_sync",
-            replace_existing=True
-        )
+        
         # Programar ejecución mensual automática el 1 de cada mes a las 08:00 AM
         _scheduler.add_job(
             scheduled_monthly_reports_job,
@@ -72,8 +63,38 @@ def start_scheduler():
             id="automatic_monthly_reports",
             replace_existing=True
         )
+        
+        # Leer horarios de los usuarios y programarlos
+        db = SessionLocal()
+        try:
+            users = db.query(user_repo.model).filter(
+                user_repo.model.activo.is_(True),
+                user_repo.model.auto_sync_enabled.is_(True)
+            ).all()
+            for user in users:
+                # Se fija a las 23:00 para todos de forma predeterminada
+                cron_time = "23:00"
+                
+                try:
+                    hour, minute = cron_time.split(":")
+                    _scheduler.add_job(
+                        scheduled_sync_job, 
+                        args=[user.id_usuario],
+                        trigger=CronTrigger(hour=int(hour), minute=int(minute)), 
+                        id=f"automatic_jira_sync_{user.id_usuario}",
+                        replace_existing=True
+                    )
+                    print(f"[Cron Scheduler] Tarea programada para usuario {user.id_usuario} a las {cron_time}.")
+                except Exception as e:
+                    print(f"[Cron Scheduler] Error programando tarea para usuario {user.id_usuario}: {e}")
+                    
+        except Exception as e:
+            print(f"[Cron Scheduler] Error al leer usuarios para programar tareas: {e}")
+        finally:
+            db.close()
+            
         _scheduler.start()
-        print("[Cron Scheduler] APScheduler iniciado. Tarea 'automatic_jira_sync' (02:00 AM) y 'automatic_monthly_reports' (1° del mes 08:00 AM) programadas.")
+        print("[Cron Scheduler] APScheduler iniciado.")
 
 def stop_scheduler():
     """Detiene el planificador si está activo."""

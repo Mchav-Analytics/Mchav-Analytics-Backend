@@ -423,31 +423,29 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nom
     # PAGE 1: PORTADA
     pdf.add_page()
     tl_swoosh, br_swoosh = _ensure_swoosh_assets()
-    # Aumentar drásticamente el tamaño del swoosh superior izquierdo
     if os.path.exists(tl_swoosh): pdf.image(tl_swoosh, x=0, y=0, w=150)
-    # Aumentar tamaño del swoosh inferior derecho y ajustarlo a la esquina
     if os.path.exists(br_swoosh): pdf.image(br_swoosh, x=80, y=190, w=130)
 
     logo_path = "C:\\Users\\vhoyos\\Desktop\\Prueba2\\Mchav-Analytics-Frontend\\public\\Logo_sf.png"
     if os.path.exists(logo_path):
-        pdf.image(logo_path, x=75, y=75, w=60)
+        pdf.image(logo_path, x=75, y=55, w=60)
 
-    pdf.set_xy(16, 140)
-    pdf.set_font('Times', 'B', 20)
+    pdf.set_xy(16, 120)
+    pdf.set_font('Times', 'B', 24)
     pdf.set_text_color(23, 37, 84) # Dark blue, same as MCHAV ANALYTICS
-    pdf.cell(178, 8, sanitize_text("REPORTE MENSUAL"), 0, 1, 'C')
+    pdf.cell(178, 10, sanitize_text("REPORTE MENSUAL"), 0, 1, 'C')
 
-    y_pos = 175
-    meta = [("PROYECTO", proyecto_nombre), ("PERÍODO", mes_str), ("FECHA DE EMISIÓN", fecha_emision), ("GENERADO POR", f"{usuario_nombre} (ADMIN)")]
+    y_pos = 145
+    meta = [("PROYECTO", proyecto_nombre), ("PERIODO", mes_str), ("FECHA DE EMISIÓN", fecha_emision), ("GENERADO POR", f"{usuario_nombre} (ADMIN)")]
     for label, val in meta:
         pdf.set_xy(16, y_pos)
-        pdf.set_font('Helvetica', 'B', 7)
+        pdf.set_font('Helvetica', 'B', 8)
         pdf.set_text_color(148, 163, 184)
         pdf.cell(178, 4, sanitize_text(label), 0, 1, 'C')
-        pdf.set_font('Times', 'B', 11)
+        pdf.set_font('Times', 'B', 12)
         pdf.set_text_color(23, 37, 84)
         pdf.cell(178, 6, sanitize_text(str(val)), 0, 1, 'C')
-        y_pos += 22
+        y_pos += 18
 
     pdf.set_xy(14, 282)
     pdf.set_font('Helvetica', 'B', 12)
@@ -458,17 +456,17 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nom
     pdf.set_text_color(156, 163, 175)
     pdf.cell(50, 4, sanitize_text("CONFIDENCIAL · USO INTERNO"), 0, 1, 'L')
 
-    # PAGE 2: ÍNDICE Y METODOLOGÍA
+    # PAGE 2: INDICE Y METODOLOGIA
     pdf.add_page()
     pdf.draw_header_footer(2)
     
     pdf.set_xy(16, 20)
     pdf.set_font('Helvetica', 'B', 14)
     pdf.set_text_color(15, 23, 42)
-    pdf.cell(178, 8, sanitize_text("2. Índice"), 0, 1, 'L')
+    pdf.cell(178, 8, sanitize_text("2. Indice"), 0, 1, 'L')
     pdf.line(16, 28, 194, 28)
     
-    idx_list = ["1. Portada", "2. Índice", "3. Introducción", "4. Metodología", "5. Resumen del mes", "6. Evolución de la entrega", "7. Estado del flujo de trabajo", "8. Tiempos y predictibilidad", "9. Velocidad y capacidad", "10. Calidad y trabajo pendiente", "11. Hallazgos principales", "12. Evolución frente al periodo anterior", "13. Plan de mejora", "14. Conclusión"]
+    idx_list = ["1. Portada", "2. Indice", "3. Introduccion", "4. Metodologia", "5. Resumen del mes", "6. Evolucion de la entrega", "7. Estado del flujo de trabajo", "8. Tiempos y predictibilidad", "9. Velocidad y capacidad", "10. Calidad y trabajo pendiente", "11. Hallazgos principales", "12. Evolucion frente al periodo anterior", "13. Plan de mejora", "14. Conclusion"]
     yi = 32
     for idx in idx_list:
         pdf.set_xy(16, yi)
@@ -590,7 +588,34 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.set_text_color(15, 23, 42)
     pdf.cell(178, 8, sanitize_text("10. Calidad y trabajo pendiente"), 0, 1, 'L')
     pdf.line(16, 168, 194, 168)
+    
+    # Agregar tabla de calidad
     pdf.set_xy(16, 172)
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(90, 6, "Indicador de Calidad", 0, 0, 'L')
+    pdf.cell(40, 6, "Total", 0, 0, 'C')
+    pdf.cell(48, 6, "Estado", 0, 1, 'R')
+    
+    pdf.line(16, 178, 194, 178)
+    
+    pdf.set_font('Helvetica', '', 9)
+    pdf.set_text_color(51, 65, 85)
+    pdf.set_xy(16, 180)
+    pdf.cell(90, 6, "Defectos (Bugs) Reportados", 0, 0, 'L')
+    pdf.cell(40, 6, str(bugs_count), 0, 0, 'C')
+    estado_bugs = "Normal" if bugs_count < 5 else "Atencion"
+    pdf.cell(48, 6, estado_bugs, 0, 1, 'R')
+    
+    pdf.set_xy(16, 186)
+    pdf.cell(90, 6, "Dias Bloqueados", 0, 0, 'L')
+    pdf.cell(40, 6, str(blocked_days), 0, 0, 'C')
+    estado_bloqueos = "Normal" if blocked_days < 10 else "Critico"
+    pdf.cell(48, 6, estado_bloqueos, 0, 1, 'R')
+    
+    pdf.line(16, 192, 194, 192)
+    
+    pdf.set_xy(16, 198)
     pdf.set_font('Helvetica', '', 10)
     pdf.multi_cell(178, 5, sanitize_text(t_calidad))
 
@@ -603,7 +628,26 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.set_text_color(15, 23, 42)
     pdf.cell(178, 8, sanitize_text("11. Hallazgos principales"), 0, 1, 'L')
     pdf.line(16, 28, 194, 28)
+    
+    # Agregar tabla de hallazgos
     pdf.set_xy(16, 32)
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(89, 6, "Metrica Clave", 0, 0, 'L')
+    pdf.cell(89, 6, "Valor Actual", 0, 1, 'R')
+    pdf.line(16, 38, 194, 38)
+    
+    pdf.set_font('Helvetica', '', 9)
+    pdf.set_text_color(51, 65, 85)
+    pdf.set_xy(16, 40)
+    pdf.cell(89, 6, "Salud Global del Sprint (Sprint Health)", 0, 0, 'L')
+    pdf.cell(89, 6, f"{health_score} / 100", 0, 1, 'R')
+    pdf.set_xy(16, 46)
+    pdf.cell(89, 6, "Predictibilidad P85", 0, 0, 'L')
+    pdf.cell(89, 6, f"{p85} dias", 0, 1, 'R')
+    pdf.line(16, 52, 194, 52)
+    
+    pdf.set_xy(16, 58)
     pdf.set_font('Helvetica', '', 10)
     pdf.multi_cell(178, 5, sanitize_text(t_hallazgos))
 

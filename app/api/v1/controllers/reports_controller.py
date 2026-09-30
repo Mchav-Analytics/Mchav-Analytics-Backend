@@ -123,6 +123,7 @@ async def get_historical_report(
 async def get_historical_report_range(
     request: Request,
     proyecto_id: str,
+    desarrollador_id: str = None,
     start_date: str = None,
     end_date: str = None,
     all_time: bool = False,
@@ -130,32 +131,23 @@ async def get_historical_report_range(
 ):
     try:
         from app.models.jira import Issue
-        issues = db.query(Issue).filter(Issue.id_proyecto == proyecto_id).all()
+        query = db.query(Issue).filter(Issue.id_proyecto == proyecto_id)
+        if desarrollador_id:
+            query = query.filter(Issue.assignee_id == desarrollador_id)
+        query = query.filter(Issue.resolved_at.isnot(None))
+        
+        if not all_time and start_date and end_date:
+            sd = datetime.strptime(start_date, "%Y-%m-%d").replace(hour=0, minute=0, second=0)
+            ed = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            query = query.filter(Issue.resolved_at >= sd, Issue.resolved_at <= ed)
+            
+        issues = query.all()
         
         total_puntos = 0
         total_tickets = 0
         
         for issue in issues:
-            query = db.query(IssueHistory).filter(
-                IssueHistory.id_jira == issue.id_jira,
-                IssueHistory.campo_modificado.in_(["story_points", "Story point estimate"])
-            )
-            
-            if not all_time and end_date:
-                ed = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
-                query = query.filter(IssueHistory.fecha_cambio <= ed)
-                
-            history_pts = query.order_by(desc(IssueHistory.fecha_cambio)).first()
-            
-            pts = 0
-            if history_pts and history_pts.valor_nuevo:
-                try:
-                    pts = float(history_pts.valor_nuevo)
-                except ValueError:
-                    pass
-            else:
-                pts = issue.story_points
-                
+            pts = float(issue.story_points) if issue.story_points is not None else 0.0
             total_puntos += pts
             total_tickets += 1
             

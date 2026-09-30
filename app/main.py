@@ -144,6 +144,11 @@ def startup_event():
             log.resultado = "ERROR"
             log.detalle_error = "La sincronización se interrumpió debido a un reinicio del servidor."
         db.commit()
+
+        # Limpiar la tabla de bloqueos (SyncLock) por si quedó algún candado atascado en un reinicio
+        from app.models.metrics import SyncLock
+        db.query(SyncLock).delete()
+        db.commit()
     except Exception as e:
         print(f"Error en inicio de servidor: {e}")
     finally:

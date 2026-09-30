@@ -77,6 +77,9 @@ class User(Base):
 
     # NUEVO: Preferencia de horario para la sincronización automática (ej: "15:36")
     cron_sync_time = Column(String(10), nullable=True, default="02:00")
+    
+    # NUEVO: Estado de la sincronización automática
+    auto_sync_enabled = Column(Boolean, nullable=False, default=True)
 
     # Estampas de tiempo automáticas de creación y última actualización
     created_at = Column(DateTime(timezone=True), server_default=func.now())

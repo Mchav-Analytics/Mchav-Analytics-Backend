@@ -15,3 +15,5 @@ api_router.include_router(developers_router, prefix="/developers", tags=["develo
 api_router.include_router(alerts_router, prefix="/alerts", tags=["alerts"])     # /api/v1/alerts
 api_router.include_router(ai_router, prefix="/ai", tags=["ai"])                 # /api/v1/ai
 api_router.include_router(flow_router, prefix="/flow", tags=["flow"])           # /api/v1/flow
+from app.api.v1.controllers.jira_controller import internal_router
+api_router.include_router(internal_router, prefix="/jira", tags=["jira_internal"])

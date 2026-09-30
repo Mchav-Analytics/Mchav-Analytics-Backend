@@ -59,6 +59,9 @@ class WebhookResponse(BaseModel):
 from app.core.security import get_current_user
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
+# Router interno para uso de background tasks y schedulers (SIN AUTENTICACIÓN GLOBAL)
+internal_router = APIRouter()
+
 @router.get(
     "/metrics", 
     response_model=JiraMetricsResponse,
@@ -149,6 +152,54 @@ async def get_jira_metrics(
             if isinstance(e, HTTPException):
                 raise e
             raise HTTPException(status_code=500, detail=str(e))
+
+@internal_router.post(
+    "/sync/internal_cron",
+    response_model=SyncMessageResponse,
+    summary="Internal endpoint para disparar el Cron"
+)
+async def trigger_internal_cron_sync(
+    background_tasks: BackgroundTasks, 
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    POST /api/v1/jira/sync/internal_cron
+    Lanza el proceso de sincronización automática desde APScheduler.
+    Al estar en FastAPI, se beneficia de las BackgroundTasks seguras.
+    """
+    user = deps.check_user_exists(db, user_id)
+    if not log_repo.try_acquire_sync_lock(db):
+        raise HTTPException(status_code=400, detail="Sincronización ya en curso")
+    
+    background_tasks.add_task(run_jira_sync_task, user.id_usuario, "AUTOMATIC")
+    return {"message": "Sincronización iniciada en segundo plano"}
+
+class AutoSyncTogglePayload(BaseModel):
+    enabled: bool
+
+@router.put(
+    "/sync/auto",
+    response_model=SyncMessageResponse,
+    summary="Activar o desactivar sincronización automática"
+)
+async def toggle_auto_sync(
+    payload: AutoSyncTogglePayload,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    PUT /api/v1/jira/sync/auto
+    Activa o desactiva la sincronización programada (cron) para el usuario actual.
+    """
+    user_id = deps.get_current_user_id(request)
+    user = deps.check_user_exists(db, user_id)
+    
+    user.auto_sync_enabled = payload.enabled
+    db.commit()
+    
+    estado = "activada" if payload.enabled else "desactivada"
+    return {"message": f"Sincronización automática {estado} exitosamente"}
 
 @router.post(
     "/sync",
@@ -265,6 +316,7 @@ async def update_cron_time(
             hour, minute = payload.cron_time.split(":")
             _scheduler.add_job(
                 scheduled_sync_job,
+                args=[user.id_usuario],
                 trigger=CronTrigger(hour=int(hour), minute=int(minute)),
                 id=f"automatic_jira_sync_{user.id_usuario}",
                 replace_existing=True

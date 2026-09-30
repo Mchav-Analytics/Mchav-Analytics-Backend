@@ -40,9 +40,15 @@ class CRUDLog(CRUDBase[LogsSincronizacion]):
         try:
             db.add(SyncLock(task_name=task_name))
             db.commit()
+            print(f"Lock adquirido exitosamente: {task_name}")
             return True
-        except IntegrityError:
+        except IntegrityError as e:
             db.rollback()
+            print(f"Error integridad al adquirir candado: {e}")
+            return False
+        except Exception as e:
+            db.rollback()
+            print(f"Otro error al adquirir candado: {e}")
             return False
 
     def release_sync_lock(self, db: Session, task_name: str = "JIRA_SYNC"):

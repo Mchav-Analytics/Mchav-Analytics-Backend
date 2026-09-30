@@ -42,6 +42,9 @@ class ReportInsightsRequest(BaseModel):
     projectId: Optional[str] = "PROJ-01"
     projectMetrics: Optional[List[Dict[str, Any]]] = []
 
+    class Config:
+        extra = "allow"
+
 
 def _build_rich_project_context(db: Session, project_id: str, user_name: str) -> Dict[str, Any]:
     """
@@ -286,7 +289,7 @@ def ai_report_insights(
     }
     
     rol_nombre = (current_user.rol.nombre_rol.lower() if current_user and current_user.rol else "")
-    is_leader = "lider" in rol_nombre or "manager" in rol_nombre or "líder" in rol_nombre
+    is_leader = "lider" in rol_nombre or "manager" in rol_nombre or "líder" in rol_nombre or "admin" in rol_nombre or "administrador" in rol_nombre
 
     report_type = metrics.get('reportType', 'sprint')
     insights = generate_report_insights(metrics, fallback_insights, report_type, is_leader=is_leader)
