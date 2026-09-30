@@ -638,3 +638,21 @@ async def get_burndown_chart(
         return {"data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{proyecto_id}/cfd")
+@router.get("/{proyecto_id}/sprints/{sprint_id}/cfd")
+async def get_project_cfd(
+    proyecto_id: str,
+    sprint_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna la evolucion de estados acumulados (Cumulative Flow Diagram - CFD)
+    para el proyecto y opcionalmente filtrado por sprint.
+    """
+    try:
+        from app.services.flow_service import flow_service
+        return flow_service.calculate_cfd_and_wip(db, proyecto_id, sprint_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
