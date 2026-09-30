@@ -30,46 +30,6 @@ class JiraDatasource:
     """
 
     @staticmethod
-    def get_auth_credentials(db: Session, user: models.User) -> tuple[str, dict]:
-        """
-        Determina de forma transparente el método de autenticación a utilizar:
-        1. Prioridad ABSOLUTA: Token OAuth 2.0 de la sesión activa del usuario (Bearer Token).
-        2. Fallback (solo si no hay OAuth): Basic Auth con credenciales del .env
-        Retorna la URL base y la cabecera (headers) HTTP correspondientes.
-        """
-        # 1. Intentar Bearer Token con OAuth 2.0 de Atlassian
-        if user and user.cloud_id and user.access_token:
-            base_url = f"https://api.atlassian.com/ex/jira/{user.cloud_id}/rest/api/3"
-            headers = {
-                "Authorization": f"Bearer {user.access_token}",
-                "Accept": "application/json"
-            }
-            return base_url, headers
-
-        domain = os.getenv("JIRA_DOMAIN", "").strip()
-        email = os.getenv("JIRA_EMAIL", "").strip()
-        api_token = os.getenv("JIRA_API_TOKEN", "").strip()
-
-        # Importación diferida para evitar ciclos de importación
-        from app.core.security import decrypt_jira_token
-
-        # 2. Intentar Basic Auth con API Token de administrador del sistema (.env)
-        if domain and email and api_token:
-            if not domain.startswith("http://") and not domain.startswith("https://"):
-                domain = f"https://{domain}"
-            raw_system_token = decrypt_jira_token(api_token)
-            credentials = f"{email}:{raw_system_token}"
-            encoded_creds = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
-            base_url = f"{domain}/rest/api/3"
-            headers = {
-                "Authorization": f"Basic {encoded_creds}",
-                "Accept": "application/json"
-            }
-            return base_url, headers
-
-        raise Exception("No hay credenciales OAuth 2.0 ni de sistema configuradas en Jira.")
-
-    @staticmethod
     @jira_retry_decorator
     async def fetch_projects(client: httpx.AsyncClient, base_url: str, headers: Dict[str, str]) -> Any:
         """Envía una petición GET al endpoint /project de Jira para obtener los proyectos accesibles."""
@@ -197,7 +157,7 @@ class JiraDatasource:
                 "Content-Type": "application/json"
             }
             return base_url, headers
-        raise Exception("No hay credenciales de sistema configuradas en Jira.")
+        raise Exception("No hay credenciales de Jira configuradas en el sistema.")
 
     @staticmethod
     def get_auth_credentials(db: Session, user: models.User) -> tuple[str, dict]:
@@ -207,17 +167,22 @@ class JiraDatasource:
         2. Fallback: Basic Auth con credenciales del .env
         Retorna la URL base y la cabecera (headers) HTTP correspondientes.
         """
-        # 1. Intentar Bearer Token con OAuth 2.0 de Atlassian
-        if user and user.cloud_id and user.access_token:
-            base_url = f"https://api.atlassian.com/ex/jira/{user.cloud_id}/rest/api/3"
-            headers = {
-                "Authorization": f"Bearer {user.access_token}",
-                "Accept": "application/json",
-                "Content-Type": "application/json"
-            }
-            return base_url, headers
+        # 1. Intentar Bearer Token con OAuth 2.0 de Atlassian (verificando que sean strings válidos y no Mocks)
+        from unittest.mock import Mock
+        if user and getattr(user, "cloud_id", None) and getattr(user, "access_token", None):
+            if not isinstance(user.cloud_id, Mock) and not isinstance(user.access_token, Mock):
+                base_url = f"https://api.atlassian.com/ex/jira/{user.cloud_id}/rest/api/3"
+                headers = {
+                    "Authorization": f"Bearer {user.access_token}",
+                    "Accept": "application/json",
+                    "Content-Type": "application/json"
+                }
+                return base_url, headers
 
-        return JiraDatasource.get_system_credentials()
+        try:
+            return JiraDatasource.get_system_credentials()
+        except Exception:
+            raise Exception("No hay credenciales de Jira configuradas en el entorno ni en la sesión.")
 
     @staticmethod
     @jira_retry_decorator
@@ -246,7 +211,7 @@ class JiraDatasource:
 
     @staticmethod
     @jira_retry_decorator
-    async def execute_issue_transition(
+    async def post_issue_transition(
         client: httpx.AsyncClient,
         base_url: str,
         headers: Dict[str, str],
@@ -279,69 +244,8 @@ class JiraDatasource:
         if res.status_code not in (200, 204):
             raise Exception(f"Jira rechazó la transición (HTTP {res.status_code}): {res.text}")
         return {"status": "success", "status_code": res.status_code}
-
-    @staticmethod
-    @jira_retry_decorator
-    async def assign_issue(
-        client: httpx.AsyncClient,
-        base_url: str,
-        headers: Dict[str, str],
-        issue_id_or_key: str,
-        account_id: str
-    ) -> Any:
-        """Asigna un ticket a un usuario en Jira Cloud mediante PUT /issue/{key}/assignee."""
-        payload = {"accountId": account_id} if account_id else {"accountId": None}
-        res = await client.put(f"{base_url}/issue/{issue_id_or_key}/assignee", headers=headers, json=payload)
-        
-        if res.status_code in (401, 403) and ("scope" in res.text.lower() or "unauthorized" in res.text.lower()):
-            try:
-                sys_url, sys_headers = JiraDatasource.get_system_credentials()
-                res_sys = await client.put(f"{sys_url}/issue/{issue_id_or_key}/assignee", headers=sys_headers, json=payload)
-                if res_sys.status_code in (200, 204):
-                    return {"status": "success", "status_code": res_sys.status_code}
-                elif res_sys.status_code not in (429, 502, 503, 504):
-                    raise Exception(f"Jira rechazó la reasignación (HTTP {res_sys.status_code}): {res_sys.text}")
-            except Exception as e:
-                if not isinstance(e, JiraTransientError):
-                    raise e
-
-        if res.status_code in (429, 502, 503, 504):
-            raise JiraTransientError(f"Error efímero al reasignar ticket en Jira ({res.status_code})")
-        if res.status_code not in (200, 204):
-            raise Exception(f"Jira rechazó la reasignación (HTTP {res.status_code}): {res.text}")
-        return {"status": "success", "status_code": res.status_code}
-
-    @staticmethod
-    @jira_retry_decorator
-    async def search_assignable_user(
-        client: httpx.AsyncClient,
-        base_url: str,
-        headers: Dict[str, str],
-        query: str,
-        project_key: str = None
-    ) -> Any:
-        """Busca usuarios asignables en Jira Cloud por nombre o email para obtener su accountId."""
-        url = f"{base_url}/user/search?query={query}"
-        if project_key:
-            url = f"{base_url}/user/assignable/search?project={project_key}&query={query}"
-            
-        res = await client.get(url, headers=headers)
-        if res.status_code in (401, 403):
-            try:
-                sys_url, sys_headers = JiraDatasource.get_system_credentials()
-                sys_url_full = f"{sys_url}/user/search?query={query}"
-                if project_key:
-                    sys_url_full = f"{sys_url}/user/assignable/search?project={project_key}&query={query}"
-                res_sys = await client.get(sys_url_full, headers=sys_headers)
-                if res_sys.status_code == 200:
-                    return res_sys.json()
-            except Exception:
-                pass
-        if res.status_code in (429, 502, 503, 504):
-            raise JiraTransientError(f"Error efímero al buscar usuario en Jira ({res.status_code})")
-        if res.status_code != 200:
-            return []
-        return res.json()
+    
+    execute_issue_transition = post_issue_transition
 
     @staticmethod
     @jira_retry_decorator

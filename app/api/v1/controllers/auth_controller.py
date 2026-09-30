@@ -93,10 +93,12 @@ async def save_jira_credentials(
     }
 
 from pydantic import BaseModel
+from typing import Optional
 
 class MockLoginPayload(BaseModel):
     email: str
-    role: str = None
+    password: Optional[str] = None
+    role: Optional[str] = None
 
 @router.post(
     "/login",
@@ -107,11 +109,14 @@ async def login_post(payload: MockLoginPayload, response: Response, db: Session 
     user = db.query(User).filter(User.email == payload.email).first()
     if not user:
         # Crea el usuario si no existe (para entorno dev)
-        rol = db.query(Role).filter(Role.nombre_rol == ("Administrador" if payload.role == "ADMIN" else "Desarrollador")).first()
+        target_role_name = "Administrador" if payload.role == "ADMIN" else ("Desarrollador" if payload.role == "DEVELOPER" else "Usuario")
+        rol = db.query(Role).filter(Role.nombre_rol == target_role_name).first()
+        if not rol:
+            rol = db.query(Role).filter(Role.nombre_rol == "Usuario").first()
         user = user_repo.create(db, obj_in={
             "email": payload.email,
             "nombre": payload.email.split("@")[0],
-            "id_rol": rol.id_rol if rol else 1,
+            "id_rol": rol.id_rol if rol else None,
             "activo": True
         })
     
@@ -157,9 +162,13 @@ def login():
     description="Endpoint de retorno configurado en Atlassian. Valida el estado CSRF, intercambia el código por el perfil del usuario y establece la sesión."
 )
 async def callback(code: str = None, state: str = None, error: str = None, response: Response = None, db: Session = Depends(get_db)):
-    if error or not code or not state or not auth_service.validate_oauth_state(state):
-        # Redirigir limpiamente al frontend si el estado expiró (reinicio de servidor o refresco manual)
-        return RedirectResponse(url=f"{FRONTEND_URL}/?login=expired", status_code=302)
+    if error:
+        return RedirectResponse(url=f"{FRONTEND_URL}/?login=error", status_code=302)
+    if not code or not state or not auth_service.validate_oauth_state(state):
+        raise HTTPException(
+            status_code=400, 
+            detail="Estado (State) inválido o expirado. Intente iniciar sesión nuevamente."
+        )
     
     try:
         u_data = await auth_service.exchange_code_for_user_profile(code)
@@ -168,7 +177,9 @@ async def callback(code: str = None, state: str = None, error: str = None, respo
         return RedirectResponse(url=f"{FRONTEND_URL}/?login=error", status_code=302)
     
     user = user_repo.get_by_jira_account_id(db, u_data["jira_account_id"])
-    rol_default = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
+    rol_default = db.query(Role).filter(Role.nombre_rol == "Usuario").first()
+    if not rol_default:
+        rol_default = db.query(Role).filter(Role.nombre_rol == "Desarrollador").first()
     if not user:
         if rol_default:
             u_data["id_rol"] = rol_default.id_rol
@@ -192,68 +203,11 @@ async def callback(code: str = None, state: str = None, error: str = None, respo
     
     return redirect
 
-from pydantic import BaseModel
-from typing import Optional
-
-class LoginPayload(BaseModel):
-    email: str
-    password: Optional[str] = None
-    role: Optional[str] = None
-
 @router.post(
-    "/login",
-    summary="Iniciar sesión local con JSON payload"
+    "/logout",
+    summary="Cerrar sesión"
 )
-async def post_login_local(
-    payload: LoginPayload,
-    response: Response,
-    db: Session = Depends(get_db)
-):
-    user = db.query(User).filter(User.email == payload.email).first()
-
-    if not user:
-        rol_name = "Administrador" if (payload.role and "ADMIN" in str(payload.role).upper()) or "vhoyos" in payload.email else "Desarrollador"
-        rol_obj = db.query(Role).filter(Role.nombre_rol == rol_name).first()
-
-        user = User(
-            email=payload.email,
-            nombre=payload.email.split("@")[0].replace(".", " ").title(),
-            activo=True,
-            id_rol=rol_obj.id_rol if rol_obj else 1
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-    signed_session = sign_session_id(user.id_usuario)
-
-    response.set_cookie(
-        key="session_id",
-        value=signed_session,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        path="/"
-    )
-
-    rol_nombre = user.rol.nombre_rol if user.rol else "Desarrollador"
-    return {
-        "id_usuario": user.id_usuario,
-        "email": user.email,
-        "nombre": user.nombre,
-        "id_rol": user.id_rol,
-        "rol": rol_nombre,
-        "activo": user.activo,
-        "token": signed_session,
-        "access_token": signed_session,
-        "jira_account_id": user.jira_account_id,
-        "cloud_id": user.cloud_id,
-        "jira_domain": user.jira_domain,
-        "jira_email": user.jira_email,
-        "api_token_vinculado": user.api_token_vinculado
-    }
-
-@router.post(
+@router.get(
     "/logout",
     summary="Cerrar sesión"
 )
@@ -282,14 +236,3 @@ async def login_local(
     signed_session = sign_session_id(user.id_usuario)
 
     return {"access_token": signed_session, "token_type": "bearer"}
-
-@router.post("/logout", summary="Cerrar sesión")
-@router.get("/logout", summary="Cerrar sesión")
-def logout():
-    """
-    Cierra la sesión del usuario eliminando la cookie de sesión HTTP-Only (session_id).
-    """
-    from fastapi.responses import JSONResponse
-    res = JSONResponse(content={"status": "success", "message": "Sesión cerrada correctamente."})
-    res.delete_cookie(key="session_id", path="/")
-    return res

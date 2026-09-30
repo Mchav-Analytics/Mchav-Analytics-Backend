@@ -183,7 +183,7 @@ def get_current_user(
 
     if user.rol is None:
         from app.models.auth import Role
-        default_role = db.query(Role).filter(Role.nombre_rol == "Administrador").first()
+        default_role = db.query(Role).filter(Role.nombre_rol == "Usuario").first()
         if not default_role:
             default_role = db.query(Role).first()
         if default_role:

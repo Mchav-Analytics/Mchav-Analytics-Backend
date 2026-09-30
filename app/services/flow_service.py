@@ -7,29 +7,32 @@ import statistics
 import app.models as models
 from typing import List, Dict, Any, Optional
 
+from app.services.jira_normalizer import categorize_flow_state, DONE_STATUSES, IN_PROGRESS_STATUSES
+
 class FlowStateCategorizer:
     """
     Categoriza estados de Jira en ACTIVE, WAITING, BLOCKED, DONE.
-    Utiliza MapeoEstado si existe, de lo contrario infiere por nombre.
+    Utiliza MapeoEstado si existe, de lo contrario infiere por nombre
+    usando el normalizador centralizado y bilingüe.
     """
     def __init__(self, db: Session, project_id: str):
         self.db = db
         self.project_id = project_id
         # Mapeos directos si existen en la BD (TODO, IN_PROGRESS, DONE)
         self.mappings = db.query(models.MapeoEstado).filter(models.MapeoEstado.id_proyecto == project_id).all()
-        self.mapping_dict = {m.estado_jira.lower(): m.estado_base.lower() for m in self.mappings}
+        self.mapping_dict = {m.estado_jira.lower().strip(): m.estado_base.lower().strip() for m in self.mappings}
 
-        # Palabras clave para inferir si no hay mapeo específico de flujo (ACTIVE/WAITING/BLOCKED)
-        # Incluye términos en inglés y español (Jira Cloud en español)
+        # Palabras clave canónicas bilingües
         self.done_keywords = [
-            "done", "finalizado", "cerrado", "resuelto", "completado", "resolved", "closed", "finished"
+            "done", "finalizado", "listo", "cerrado", "resuelto", "completado",
+            "resolved", "closed", "finished", "terminado"
         ]
         self.blocked_keywords = [
-            "block", "impediment", "bloqueado", "impedido", "detenido"
+            "block", "impediment", "bloqueado", "impedido", "detenido", "impedimento"
         ]
         self.waiting_keywords = [
-            "wait", "review", "qa", "test", "ready", "espera", "revisión", "revision",
-            "listo", "pendiente", "aprobación", "aprobacion"
+            "wait", "waiting", "review", "qa", "test", "ready", "espera",
+            "revisión", "revision", "pendiente", "aprobación", "aprobacion"
         ]
         self.active_keywords = [
             "progress", "doing", "develop", "progreso", "desarrollo", "active",
@@ -40,28 +43,19 @@ class FlowStateCategorizer:
         if not state_name:
             return "WAITING"
 
-        lower_state = state_name.lower()
+        lower_state = state_name.lower().strip()
 
-        # 1. Done primero para no confundir con otras categorías
-        if any(k in lower_state for k in self.done_keywords):
-            return "DONE"
-
-        # 2. Inferir por palabras clave específicas de flujo
-        if any(k in lower_state for k in self.blocked_keywords):
-            return "BLOCKED"
-        if any(k in lower_state for k in self.active_keywords):
-            return "ACTIVE"
-        if any(k in lower_state for k in self.waiting_keywords):
-            return "WAITING"
-
-        # 3. Fallback a MapeoEstado base
-        base_state = self.mapping_dict.get(lower_state, "todo")
-        if base_state == "in_progress":
-            return "ACTIVE"
+        # 1. Verificar MapeoEstado explícito de la BD si existe
+        base_state = self.mapping_dict.get(lower_state)
         if base_state == "done":
             return "DONE"
+        if base_state == "in_progress":
+            if any(k in lower_state for k in self.waiting_keywords):
+                return "WAITING"
+            return "ACTIVE"
 
-        return "WAITING"  # Por defecto todo lo que no se reconoce
+        # 2. Delegar a la función unificada de categorización
+        return categorize_flow_state(state_name, self.db, self.project_id)
 
 def get_issue_flow_timeline(issue: models.Issue) -> List[Dict[str, Any]]:
     """

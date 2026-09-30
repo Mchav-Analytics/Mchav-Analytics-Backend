@@ -12,26 +12,28 @@ from app.services.alerts_engine_service import (
     create_help_request,
     update_help_request_status
 )
+from app.services.project_resolver import resolve_project_id
 
 router = APIRouter()
 
 @router.get("", response_model=List[Dict[str, Any]])
 @router.get("/", response_model=List[Dict[str, Any]])
 async def list_system_alerts(
-    proyecto_id: str = Query("PROJ-01", description="ID del proyecto"),
+    proyecto_id: Optional[str] = Query(None, description="ID del proyecto"),
     db: Session = Depends(get_db)
 ):
     """
     GET /api/v1/alerts
     Obtiene la lista de alertas generadas automáticamente por el motor analítico (Bloqueos >48h, WIP excesivo, Cycle time).
     """
+    target_pid = resolve_project_id(db, proyecto_id)
     try:
-        return get_system_alerts(db, proyecto_id)
+        return get_system_alerts(db, target_pid)
     except Exception as e:
         if db:
             db.rollback()
         print("Error en list_system_alerts:", e)
-        return get_system_alerts(None, proyecto_id)
+        return get_system_alerts(None, target_pid)
 
 @router.post("/{alert_id}/acknowledge")
 async def mark_alert_acknowledged(
@@ -51,19 +53,20 @@ async def mark_alert_acknowledged(
 
 @router.get("/help-requests")
 async def list_help_requests(
-    proyecto_id: str = Query("PROJ-01", description="ID del proyecto"),
+    proyecto_id: Optional[str] = Query(None, description="ID del proyecto"),
     db: Session = Depends(get_db)
 ):
     """
     GET /api/v1/alerts/help-requests
     Obtiene el listado de solicitudes de ayuda y escalamiento enviadas por desarrolladores o planificadores.
     """
+    target_pid = resolve_project_id(db, proyecto_id)
     try:
-        return get_help_requests(db, proyecto_id)
+        return get_help_requests(db, target_pid)
     except Exception as e:
         if db:
             db.rollback()
-        return get_help_requests(None, proyecto_id)
+        return get_help_requests(None, target_pid)
 
 @router.post("/help-requests")
 async def submit_help_request(
