@@ -651,8 +651,9 @@ async def get_project_cfd(
     para el proyecto y opcionalmente filtrado por sprint.
     """
     try:
-        from app.services.flow_service import flow_service
+        from app.services import flow_service
         return flow_service.calculate_cfd_and_wip(db, proyecto_id, sprint_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
