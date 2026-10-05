@@ -84,7 +84,9 @@ def dispatch_monthly_reports(db: Session, target_email: Optional[str] = None) ->
     proj_name = proyectos_activos[0].nombre if proyectos_activos else "MCHAV Analytics"
 
     # Generación física del archivo PDF oficial completo (con las gráficas de Matplotlib del Centro de Reportes)
-    pdf_bytes = generate_pdf_report_bytes(db, proyecto_id=first_proj_id, usuario_nombre="Administrador")
+    # Generación de un PDF por rol: narrativa ejecutiva (Admin) vs. narrativa táctica (Líder Técnico)
+    pdf_bytes_admin = generate_pdf_report_bytes(db, proyecto_id=first_proj_id, usuario_nombre="Administrador", is_leader=False)
+    pdf_bytes_leader = generate_pdf_report_bytes(db, proyecto_id=first_proj_id, usuario_nombre="Líder Técnico", is_leader=True)
 
     sent_admin_count = 0
     sent_leader_count = 0
@@ -100,12 +102,12 @@ def dispatch_monthly_reports(db: Session, target_email: Optional[str] = None) ->
 
     # 1. Enviar correo de notificación Admin con PDF adjunto
     html_admin = _build_admin_email_html(admin_name=target_name)
-    if send_email(recipient_email, f"📊 Reporte Mensual de Rendimiento de Portafolio - {datetime.now().strftime('%B %Y')}", html_admin, pdf_bytes, pdf_filename_admin):
+    if send_email(recipient_email, f"📊 Reporte Mensual de Rendimiento de Portafolio - {datetime.now().strftime('%B %Y')}", html_admin, pdf_bytes_admin, pdf_filename_admin):
         sent_admin_count += 1
 
     # 2. Enviar correo de notificación Líder con PDF adjunto
     html_leader = _build_leader_email_html(leader_name=target_name, project_name=proj_name)
-    if send_email(recipient_email, f"🚀 Reporte Mensual de Proyecto ({proj_name}) - MCHAV Analytics", html_leader, pdf_bytes, pdf_filename_leader):
+    if send_email(recipient_email, f"🚀 Reporte Mensual de Proyecto ({proj_name}) - MCHAV Analytics", html_leader, pdf_bytes_leader, pdf_filename_leader):
         sent_leader_count += 1
 
     logger.info(f"[MonthlyReportDispatcher] Proceso finalizado. Correos enviados a {recipient_email}: Admins ({sent_admin_count}), Líderes ({sent_leader_count})")

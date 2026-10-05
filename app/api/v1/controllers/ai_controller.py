@@ -2,7 +2,7 @@
 # Controlador HTTP para la interacción conversacional en tiempo real con la IA de Google Gemini
 
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Header
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -220,7 +220,8 @@ def get_suggested_prompts():
 def ai_report_insights(
     payload: ReportInsightsRequest,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
+    current_user: models.User = Depends(get_current_user),
+    x_view_role: Optional[str] = Header(None)
 ):
     """
     POST /api/v1/ai/generate-report-insights
@@ -288,8 +289,10 @@ def ai_report_insights(
         "generalConclusion": "El equipo se encuentra operando dentro de los márgenes previstos."
     }
     
-    rol_nombre = (current_user.rol.nombre_rol.lower() if current_user and current_user.rol else "")
-    is_leader = "lider" in rol_nombre or "manager" in rol_nombre or "líder" in rol_nombre or "admin" in rol_nombre or "administrador" in rol_nombre
+    # Rol efectivo: el rol de vista activo (selector de rol del frontend) tiene prioridad sobre el rol en BD.
+    # Admin y Líder reciben narrativas distintas (ejecutiva vs. táctica), por eso Admin NO se trata como líder.
+    rol_nombre = (x_view_role or (current_user.rol.nombre_rol if current_user and current_user.rol else "")).lower()
+    is_leader = any(k in rol_nombre for k in ("lider", "líder", "manager", "leader"))
 
     report_type = metrics.get('reportType', 'sprint')
     insights = generate_report_insights(metrics, fallback_insights, report_type, is_leader=is_leader)

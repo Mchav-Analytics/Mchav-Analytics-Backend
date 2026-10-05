@@ -454,51 +454,121 @@ def _build_pdf_monthly_prompt(metrics):
     pct = metrics.get("completionPct", 0)
 
     return f"""
-Actúa como un Senior Agile Data Scientist. Eres el encargado de redactar el texto de un reporte ejecutivo mensual en PDF.
+Actúa como un Senior Agile Data Scientist y Director Analítico. Eres el encargado de redactar el texto de un reporte ejecutivo mensual en PDF para C-levels y líderes.
 Tu tono debe ser profesional, analítico, directo al grano y sin rodeos. Nada de introducciones ni saludos.
 
 Datos del mes:
 - Velocidad: {v} Story Points completados.
 - Rendimiento (Throughput): {t} tickets completados.
-- Tiempo de ciclo promedio: {ct} días.
-- Días bloqueados: {bd} días.
-- Bugs: {bugs}.
-- Alcance total: {scope} Story Points.
-- Salud global: {health}/100.
+- Tiempo de ciclo promedio: {ct} días hábiles.
+- Días bloqueados acumulados: {bd} días.
+- Bugs reportados/resueltos: {bugs}.
+- Alcance total planificado: {scope} Story Points.
+- Salud global del sprint/mes: {health}/100.
 - Predictibilidad (Percentiles): P50={p50}d, P85={p85}d, P95={p95}d.
-- Completitud: {pct}%.
+- Completitud de entrega: {pct}%.
 
-DEBES generar EXACTAMENTE las siguientes secciones usando estas etiquetas exactas (esto es vital para el parser del PDF). Para cada sección, escribe un párrafo breve, contundente y directo interpretando los datos:
+REGLAS OBLIGATORIAS:
+1. Tono ejecutivo, estratégico y extremadamente directo al grano.
+2. No uses adornos, saludos, ni palabras de relleno. Ve directo al dato y su implicación.
+3. ESTRUCTURA LA EVALUACIÓN EN 3 NIVELES para cada sección: a) Dato observado → b) Tendencia → c) Impacto.
+4. Genera el contenido ESTRICTAMENTE utilizando las siguientes etiquetas y escribe MÁXIMO 2 a 3 LÍNEAS por cada sección. No te extiendas.
 
 [PROYECTO_RESUMEN]
-(Escribe 1 párrafo resumiendo el estado general del mes, destacando si el equipo fue eficiente o tuvo trabas. Cita {t} tickets y {v} SP).
+(Resumen ejecutivo general del mes. Cita {t} tickets, {v} SP y la salud {health}/100 para dar un veredicto claro).
 
 [PROYECTO_ENTREGA]
-(Analiza la evolución de la entrega -Burnup-. Menciona el alcance de {scope} SP frente a lo completado, si hubo un ritmo constante o picos al final).
+(Analiza la evolución de la entrega -Burnup-. Menciona la completitud del {pct}% respecto al alcance de {scope} SP).
 
 [PROYECTO_FLUJO]
-(Analiza el flujo de trabajo -CFD-. Menciona cuellos de botella, bloqueos ({bd} días) o acumulación de tickets en progreso).
+(Analiza el flujo de trabajo -CFD-. Evalúa la fricción por los {bd} días bloqueados y los estancamientos).
 
 [PROYECTO_TIEMPOS]
-(Analiza los tiempos de resolución -Scatter Plot-. Explica que el 85% de los tickets toman {p85} días o menos. Valora si es predecible o hay outliers de {p95} días).
+(Analiza la predictibilidad y el Cycle Time medio de {ct}d. Menciona que el 85% se resuelve en {p85} días o menos).
 
 [PROYECTO_CAPACIDAD]
-(Analiza la velocidad del equipo frente a su compromiso. ¿Lograron entregar lo prometido ({planned} SP)?).
+(Analiza la capacidad del equipo basándote en la velocidad y estabilidad del throughput mensual).
 
 [PROYECTO_CALIDAD]
-(Analiza la calidad y los {bugs} bugs reportados. ¿Es un nivel aceptable o riesgoso?).
+(Analiza la calidad técnica basándote en los {bugs} bugs y su impacto en el trabajo).
 
 [PROYECTO_HALLAZGOS]
-(Identifica 2 hallazgos principales del mes. Ve directo al grano).
+(Identifica 2 hallazgos principales del mes con evidencia cuantitativa).
 
 [PROYECTO_EVOLUCION]
-(Analiza brevemente cómo fue la evolución general comparada con las expectativas).
+(Interpreta la evolución frente a las expectativas operativas del periodo).
 
 [PROYECTO_MEJORA]
-(Propón 2 acciones concretas de mejora para el próximo mes).
+(Propón 2 recomendaciones directas y tácticas para el equipo y el Líder Técnico).
 
 [PROYECTO_CONCLUSION]
-(Un párrafo final de cierre estratégico. ¿Estamos bien o mal?).
+(Un párrafo corto de conclusión estratégica sobre la viabilidad y ritmo actual del proyecto).
+"""
+
+def _build_lider_pdf_monthly_prompt(metrics):
+    v = metrics.get("velocity", 0)
+    t = metrics.get("throughput", 0)
+    ct = metrics.get("cycleTime", 0)
+    bd = metrics.get("blockedDays", 0)
+    bugs = metrics.get("bugs", 0)
+    scope = metrics.get("scope", 0)
+    health = metrics.get("sprintHealth", 0)
+    p50 = metrics.get("p50", 0)
+    p85 = metrics.get("p85", 0)
+    p95 = metrics.get("p95", 0)
+    planned = metrics.get("planned", 0)
+    pct = metrics.get("completionPct", 0)
+
+    return f"""
+Actúa como un Asistente Analítico Experto y Facilitador Ágil. Eres el encargado de redactar el texto de un reporte mensual en PDF para el Líder Técnico y el equipo de desarrollo.
+Tu tono debe ser táctico, directo al grano y enfocado en la mejora continua y resolución de impedimentos operativos. Nada de introducciones ni saludos.
+
+Datos del mes:
+- Velocidad: {v} Story Points completados.
+- Rendimiento (Throughput): {t} tickets completados.
+- Tiempo de ciclo promedio: {ct} días hábiles.
+- Días bloqueados acumulados: {bd} días.
+- Bugs reportados/resueltos: {bugs}.
+- Alcance total planificado: {scope} Story Points.
+- Salud global del sprint/mes: {health}/100.
+- Predictibilidad (Percentiles): P50={p50}d, P85={p85}d, P95={p95}d.
+- Completitud de entrega: {pct}%.
+
+REGLAS OBLIGATORIAS:
+1. Tono táctico, enfocado en el equipo, cuellos de botella y calidad técnica.
+2. No uses adornos, saludos, ni palabras de relleno. Ve directo al dato y su implicación técnica.
+3. ESTRUCTURA LA EVALUACIÓN EN 3 NIVELES para cada sección: a) Dato observado → b) Causa raíz u obstáculo → c) Acción recomendada.
+4. Genera el contenido ESTRICTAMENTE utilizando las siguientes etiquetas y escribe MÁXIMO 2 a 3 LÍNEAS por cada sección. No te extiendas.
+
+[PROYECTO_RESUMEN]
+(Resumen técnico general del mes. Cita {t} tickets, {v} SP y la salud {health}/100 para evaluar el ritmo del equipo).
+
+[PROYECTO_ENTREGA]
+(Analiza la completitud del {pct}% respecto al alcance de {scope} SP. ¿Hubo deuda o spillover?).
+
+[PROYECTO_FLUJO]
+(Analiza el CFD. Evalúa dónde están los cuellos de botella y el impacto de los {bd} días bloqueados).
+
+[PROYECTO_TIEMPOS]
+(Analiza el Cycle Time de {ct}d y el P85 de {p85}d. ¿El equipo está perdiendo tiempo en bucles de revisión o QA?).
+
+[PROYECTO_CAPACIDAD]
+(Analiza si el equipo está sobrecargado o si la velocidad está fragmentada en micro-tareas).
+
+[PROYECTO_CALIDAD]
+(Analiza la incidencia de los {bugs} bugs en la arquitectura y si falta refinamiento).
+
+[PROYECTO_HALLAZGOS]
+(Identifica 2 fricciones operativas principales del mes con evidencia cuantitativa).
+
+[PROYECTO_EVOLUCION]
+(Interpreta si el equipo ha mejorado sus prácticas técnicas respecto a periodos anteriores).
+
+[PROYECTO_MEJORA]
+(Propón 2 prácticas ágiles o de ingeniería directas que el Líder Técnico debe implementar de inmediato).
+
+[PROYECTO_CONCLUSION]
+(Un párrafo corto de conclusión técnica sobre el estado de salud operativa del equipo).
 """
 
 def generate_report_insights(metrics: dict, fallback: dict, report_type: str = "sprint", is_leader: bool = False) -> str:
@@ -529,7 +599,7 @@ def generate_report_insights(metrics: dict, fallback: dict, report_type: str = "
         elif report_type == "desarrollador" or report_type == "cierre_desarrollador":
             prompt = _build_lider_desarrollador_prompt(metrics, v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
         elif report_type == "monthly_pdf":
-            prompt = _build_pdf_monthly_prompt(metrics)
+            prompt = _build_lider_pdf_monthly_prompt(metrics)
         elif report_type == "proyecto":
             prompt = _build_lider_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
         elif report_type == "cierre_proyecto":
@@ -709,7 +779,9 @@ Redacta directamente 2 párrafos limpios resumiendo el desempeño de este sprint
         pct = metrics.get("completionPct", 0)
         prompt = _build_sprint_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
 
-    reply = _call_gemini_rest_api(prompt, temperature=0.7, max_tokens=2500)
+    # Reglas globales de fidelidad y tono: aplican a TODOS los reportes (Admin y Líder)
+    prompt = f"{prompt}\n{_build_fidelity_rules(metrics)}"
+    reply = _call_gemini_rest_api(prompt, temperature=0.4, max_tokens=2500)
     if reply:
         sanitized = _sanitize_ai_reply(reply)
         gemini_cache.set(cache_key, sanitized)
@@ -719,24 +791,82 @@ Redacta directamente 2 párrafos limpios resumiendo el desempeño de este sprint
     gemini_cache.set(cache_key, fb)
     return fb
 
+def _build_fidelity_rules(metrics: dict) -> str:
+    """Reglas anti-invención y anti-alarmismo que se anexan al final de cada prompt de reporte."""
+    try:
+        health = float(metrics.get("sprintHealth", 0) or 0)
+    except (TypeError, ValueError):
+        health = 0
+    urgency_rule = (
+        f"- La salud es {health:.0f}/100 (estable): PROHIBIDO expresar urgencia (\"inmediato\", \"urgente\", \"crítico\", \"exige\"). Usa \"se recomienda\"."
+        if health >= 70 else
+        "- Aunque la salud sea baja, describe la situación con datos y tono constructivo, sin dramatizar."
+    )
+    return f"""
+REGLAS FINALES OBLIGATORIAS (prevalecen sobre cualquier instrucción anterior):
+- Usa ÚNICAMENTE las métricas entregadas arriba. No inventes cifras, causas ni contexto.
+- PROHIBIDO atribuir causas que no estén en los datos (p. ej. falta de pruebas unitarias, pipelines, arquitectura, integraciones, code reviews, criterios DoD). Si sugieres una causa, preséntala como hipótesis a validar ("podría estar asociado a...").
+- PROHIBIDO afirmar tendencias históricas ("sostenida", "en los últimos ciclos", "creció", "cayó") si no se entregaron datos de periodos anteriores.
+- PROHIBIDO afirmar impacto en producción o en clientes si no hay datos que lo respalden.
+{urgency_rule}
+- Escribe siempre los porcentajes con el símbolo % (ej. 86%).
+"""
+
+
+def _strip_accents(s: str) -> str:
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+
+
+def _accent_insensitive_regex(phrase: str) -> str:
+    """Convierte una frase en un patrón regex que acepta la versión con o sin tildes (para BUSCAR).
+    El texto original del reporte no se modifica: solo se reemplaza la frase encontrada."""
+    import re
+    variants = {"a": "[aáà]", "e": "[eéè]", "i": "[iíì]", "o": "[oóò]", "u": "[uúüù]"}
+    base = _strip_accents(phrase.lower())
+    return "".join(variants.get(ch, re.escape(ch)) for ch in base)
+
+
+def _match_case(original: str, replacement: str) -> str:
+    """Si la frase original empezaba en mayúscula (inicio de oración), el reemplazo también."""
+    if original[:1].isupper() and replacement:
+        return replacement[0].upper() + replacement[1:]
+    return replacement
+
+
 def _sanitize_ai_reply(text: str) -> str:
-    """Elimina o suaviza frases alarmistas o imprecisas generadas por la IA."""
+    """Elimina o suaviza frases alarmistas o imprecisas generadas por la IA.
+    La búsqueda ignora tildes y mayúsculas; el reemplazo conserva la ortografía correcta."""
+    import re
     if not text:
         return ""
-    replacements = {
-        "ceros absolutos en velocidad": "flujo de trabajo enfocado en Throughput",
-        "ceros absolutos": "ausencia de estimaciones en puntos",
-        "parálisis total": "operación en flujo continuo",
-        "desconexión crítica": "oportunidad de mejora en la trazabilidad de estimaciones",
-        "teletransportación de código": "registro dinámico de incidencias",
-        "intervención gerencial": "apoyo técnico al equipo",
-        "intervención ejecutiva": "seguimiento facilitador",
-        "con creces": "cumpliendo los criterios definidos",
-        "ANACITYCS": "ANALYTICS"
-    }
+    # Orden importa: frases largas primero
+    replacements = [
+        ("ceros absolutos en velocidad", "flujo de trabajo enfocado en Throughput"),
+        ("ceros absolutos", "ausencia de estimaciones en puntos"),
+        ("parálisis total", "operación en flujo continuo"),
+        ("desconexión crítica", "oportunidad de mejora en la trazabilidad de estimaciones"),
+        ("teletransportación de código", "registro dinámico de incidencias"),
+        ("intervención gerencial", "apoyo técnico al equipo"),
+        ("intervención ejecutiva", "seguimiento facilitador"),
+        ("intervención inmediata", "acciones de mejora"),
+        ("exige correcciones inmediatas", "sugiere ajustes"),
+        ("requiere correcciones inmediatas", "sugiere ajustes"),
+        ("correcciones inmediatas", "ajustes recomendados"),
+        ("acciones inmediatas", "acciones recomendadas"),
+        ("medidas inmediatas", "medidas recomendadas"),
+        ("atención inmediata", "seguimiento"),
+        ("de inmediato", "en el próximo ciclo"),
+        ("de manera urgente", "de forma prioritaria"),
+        ("insostenible", "con oportunidad de optimización"),
+        ("con creces", "cumpliendo los criterios definidos"),
+    ]
     res = str(text)
-    for old, new in replacements.items():
-        res = res.replace(old, new)
+    for old, new in replacements:
+        pattern = r"\b" + _accent_insensitive_regex(old) + r"\b"
+        res = re.sub(pattern, lambda m, n=new: _match_case(m.group(0), n), res, flags=re.IGNORECASE)
+    # Corrección de marca (respeta mayúsculas exactas)
+    res = res.replace("ANACITYCS", "ANALYTICS")
     return res
 
 def _build_lider_sprint_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
@@ -777,43 +907,44 @@ def _build_lider_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p9
     return f"""
 Actúa como un Asistente Analítico Experto del Líder Técnico y Facilitador Ágil. No te presentes, no digas tu nombre ni uses saludos iniciales.
 Analiza el proyecto con los datos:
-Velocidad entregada: {v} SP. Throughput: {t} tickets resueltos. Tareas en deuda: {spillover} SP. Cycle Time medio: {ct} días hábiles (descontando fines de semana). Días bloqueados: {bd}. Bugs: {bugs}.
+Velocidad entregada: {v} SP de {planned} SP planificados ({pct}% de cumplimiento). Throughput: {t} tickets resueltos. Tareas en deuda: {spillover} SP. Cycle Time medio: {ct} días hábiles (descontando fines de semana); P85: {p85}d; P95: {p95}d. Días bloqueados: {bd}. Bugs: {bugs}. Salud: {health}/100.
 
 REGLAS OBLIGATORIAS DE TONO Y ESTILO:
 1. Utiliza un tono constructivo, de soporte y enfocado en la mejora continua del equipo.
-2. ESTRUCTURA LA EVALUACIÓN EN 3 NIVELES: a) Dato observado → b) Relación o tendencia → c) Conclusión analítica.
+2. ESTRUCTURA LA EVALUACIÓN EN 3 NIVELES: a) Dato observado → b) Relación o tendencia → c) Conclusión o acción táctica.
+3. BREVEDAD ESTRICTA: cada nivel (a, b, c) es UNA sola línea corta. Máximo 3 líneas por sección. Sin relleno.
 
 ESTRUCTURA DE SECCIONES (Utiliza exactamente estas etiquetas [PROYECTO_X]):
 
 [PROYECTO_RESUMEN]
-Analiza brevemente: {t} tickets completados, {spillover} SP pendientes. No repitas la tabla, explica qué significan juntos.
+{t} tickets completados, {pct}% del alcance y {spillover} SP pendientes: qué significan juntos.
 
 [PROYECTO_ENTREGA]
-Analiza la evolución de entrega basándote en la velocidad y el throughput. Explica qué significa este volumen de entrega para el negocio.
+Velocidad y throughput: qué implica este volumen para la planificación del equipo.
 
 [PROYECTO_FLUJO]
-Analiza el flujo de trabajo: evalúa la fricción generada por los {bd} días bloqueados y su posible impacto en la entrega de valor.
+Fricción generada por los {bd} días bloqueados y acción táctica para reducirla.
 
 [PROYECTO_TIEMPOS]
-Analiza el Cycle Time medio ({ct}d). Considera la complejidad, días laborales y bloqueos antes de juzgar la eficiencia.
+Cycle Time ({ct}d, P85 {p85}d): estabilidad del flujo y acción sobre la cola larga.
 
 [PROYECTO_CAPACIDAD]
-Analiza la velocidad ({v} SP). ¿Mostró un crecimiento sostenido o hubo caídas? ¿Por qué?
+Velocidad ({v} SP) frente a lo planificado ({planned} SP) y ajuste de compromiso sugerido.
 
 [PROYECTO_CALIDAD]
-Analiza los {bugs} bugs y el trabajo pendiente.
+Los {bugs} bugs en relación con los {t} tickets entregados.
 
 [PROYECTO_HALLAZGOS]
-Menciona 3 a 5 hallazgos principales con evidencia (ej. "01 - Aumento de la velocidad: Pasó de X a Y...").
+3 hallazgos con evidencia numérica de los datos anteriores (una línea cada uno).
 
 [PROYECTO_EVOLUCION]
-Interpreta la evolución frente al periodo anterior (mejorando, empeorando o estable).
+Si no hay datos de periodos anteriores, escribe exactamente: "Sin datos del periodo anterior para comparar."
 
 [PROYECTO_MEJORA]
-Propón 3 recomendaciones específicas (Hallazgo, Acción propuesta, Objetivo). Nada genérico.
+3 recomendaciones (Hallazgo → Acción → Objetivo medible), una línea cada una.
 
 [PROYECTO_CONCLUSION]
-Conclusión corta: ¿Cómo terminó el mes? (sin repetir métricas exactas).
+Una sola línea: cómo terminó el periodo.
 """
 
 def _build_cierre_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):

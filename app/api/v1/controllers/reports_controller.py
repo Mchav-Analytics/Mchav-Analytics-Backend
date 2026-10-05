@@ -30,11 +30,16 @@ async def download_pdf_report(
         user_id = deps.get_current_user_id(request)
         user = deps.check_user_exists(db, user_id)
         user_name = user.nombre or user.email or "Administrador"
+        db_role = user.rol.nombre_rol if getattr(user, "rol", None) else ""
     except Exception:
         user_name = "Valka Hoyos (Administrador)"
+        db_role = ""
+
+    rol_nombre = (request.headers.get("x-view-role") or db_role or "").lower()
+    is_leader = any(k in rol_nombre for k in ("lider", "líder", "manager", "leader"))
 
     try:
-        pdf_bytes = generate_pdf_report_bytes(db, proyecto_id, usuario_nombre=user_name)
+        pdf_bytes = generate_pdf_report_bytes(db, proyecto_id, usuario_nombre=user_name, is_leader=is_leader)
         
         filename = f"reporte_kpis_{proyecto_id}.pdf"
         headers = {

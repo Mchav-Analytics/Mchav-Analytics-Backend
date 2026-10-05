@@ -324,7 +324,7 @@ def _extract_section(text, section_tag):
         return clean_text
     return "Análisis no disponible para esta sección."
 
-def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nombre: str = "Administrador") -> bytes:
+def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nombre: str = "Administrador", is_leader: bool = False) -> bytes:
     """
     Genera físicamente el archivo PDF oficial estructurado multitemporalmente (14 Secciones).
     """
@@ -387,7 +387,7 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nom
             'planned': planned,
             'completionPct': pct_completion
         }
-        ai_full_text = generate_report_insights(metrics_payload, {}, report_type="monthly_pdf", is_leader=True)
+        ai_full_text = generate_report_insights(metrics_payload, {}, report_type="monthly_pdf", is_leader=is_leader)
     except Exception as e:
         print("Error Gemini:", e)
         ai_full_text = ""
@@ -428,24 +428,32 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nom
 
     logo_path = "C:\\Users\\vhoyos\\Desktop\\Prueba2\\Mchav-Analytics-Frontend\\public\\Logo_sf.png"
     if os.path.exists(logo_path):
-        pdf.image(logo_path, x=75, y=55, w=60)
+        pdf.image(logo_path, x=75, y=50, w=60)
 
-    pdf.set_xy(16, 120)
-    pdf.set_font('Times', 'B', 24)
-    pdf.set_text_color(23, 37, 84) # Dark blue, same as MCHAV ANALYTICS
-    pdf.cell(178, 10, sanitize_text("REPORTE MENSUAL"), 0, 1, 'C')
+    pdf.set_xy(16, 115)
+    pdf.set_font('Helvetica', 'B', 32)
+    pdf.set_text_color(15, 23, 42) # Dark blue/slate
+    pdf.cell(178, 12, sanitize_text("REPORTE MENSUAL"), 0, 1, 'C')
+    
+    pdf.set_xy(16, 128)
+    pdf.set_font('Helvetica', '', 14)
+    pdf.set_text_color(100, 116, 139)
+    pdf.cell(178, 8, sanitize_text("ANÁLISIS DE RENDIMIENTO Y ESTADO DEL PORTAFOLIO"), 0, 1, 'C')
 
-    y_pos = 145
+    pdf.set_draw_color(203, 213, 225)
+    pdf.line(75, 142, 135, 142)
+
+    y_pos = 152
     meta = [("PROYECTO", proyecto_nombre), ("PERIODO", mes_str), ("FECHA DE EMISIÓN", fecha_emision), ("GENERADO POR", f"{usuario_nombre} (ADMIN)")]
     for label, val in meta:
         pdf.set_xy(16, y_pos)
         pdf.set_font('Helvetica', 'B', 8)
         pdf.set_text_color(148, 163, 184)
         pdf.cell(178, 4, sanitize_text(label), 0, 1, 'C')
-        pdf.set_font('Times', 'B', 12)
-        pdf.set_text_color(23, 37, 84)
+        pdf.set_font('Helvetica', 'B', 14)
+        pdf.set_text_color(30, 41, 59)
         pdf.cell(178, 6, sanitize_text(str(val)), 0, 1, 'C')
-        y_pos += 18
+        y_pos += 14
 
     pdf.set_xy(14, 282)
     pdf.set_font('Helvetica', 'B', 12)
@@ -470,7 +478,7 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nom
     yi = 32
     for idx in idx_list:
         pdf.set_xy(16, yi)
-        pdf.set_font('Helvetica', '', 10)
+        pdf.set_font('Times', '', 11)
         pdf.set_text_color(51, 65, 85)
         pdf.cell(178, 5, sanitize_text(idx), 0, 1, 'L')
         yi += 6
@@ -481,8 +489,8 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nom
     pdf.cell(178, 8, sanitize_text("3. Introducción — ¿Qué se está evaluando?"), 0, 1, 'L')
     pdf.line(16, yi + 18, 194, yi + 18)
     pdf.set_xy(16, yi + 22)
-    pdf.set_font('Helvetica', '', 10)
-    pdf.multi_cell(178, 5, sanitize_text(f"Este reporte presenta el comportamiento del trabajo durante {mes_str}, considerando la evolución de la entrega, el flujo de trabajo, los tiempos de atención y los principales hallazgos identificados durante el periodo."))
+    pdf.set_font('Times', '', 11)
+    pdf.multi_cell(178, 6, sanitize_text(f"Este reporte presenta el comportamiento del trabajo durante {mes_str}, considerando la evolución de la entrega, el flujo de trabajo, los tiempos de atención y los principales hallazgos identificados durante el periodo."))
 
     pdf.set_xy(16, yi + 45)
     pdf.set_font('Helvetica', 'B', 14)
@@ -490,12 +498,12 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nom
     pdf.cell(178, 8, sanitize_text("4. Metodología — ¿Cómo se realizó el análisis?"), 0, 1, 'L')
     pdf.line(16, yi + 53, 194, yi + 53)
     pdf.set_xy(16, yi + 57)
-    pdf.set_font('Helvetica', '', 10)
+    pdf.set_font('Times', '', 11)
     met_text = """Periodo analizado: Mes completo.
 Proyectos incluidos: Snapshot de Jira Cloud.
 Métricas utilizadas: Velocity, Throughput, Cycle Time y flujos CFD.
 Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festivos para reflejar capacidad real operativa."""
-    pdf.multi_cell(178, 5, sanitize_text(met_text))
+    pdf.multi_cell(178, 6, sanitize_text(met_text))
 
     # PAGE 3: RESUMEN Y EVOLUCION ENTREGA
     pdf.add_page()
@@ -532,8 +540,8 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.set_xy(16, 62)
     pdf.set_font('Helvetica', 'B', 10)
     pdf.cell(178, 6, sanitize_text("Lectura del periodo"), 0, 1, 'L')
-    pdf.set_font('Helvetica', '', 10)
-    pdf.multi_cell(178, 5, sanitize_text(t_resumen))
+    pdf.set_font('Times', '', 11)
+    pdf.multi_cell(178, 6, sanitize_text(t_resumen))
 
     pdf.set_xy(16, 120)
     pdf.set_font('Helvetica', 'B', 14)
@@ -542,8 +550,8 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.line(16, 128, 194, 128)
     pdf.image(burnup_img, x=20, y=132, w=160)
     pdf.set_xy(16, 215)
-    pdf.set_font('Helvetica', '', 10)
-    pdf.multi_cell(178, 5, sanitize_text(t_entrega))
+    pdf.set_font('Times', '', 11)
+    pdf.multi_cell(178, 6, sanitize_text(t_entrega))
 
     # PAGE 4: FLUJO Y TIEMPOS
     pdf.add_page()
@@ -556,8 +564,8 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.line(16, 28, 194, 28)
     pdf.image(cfd_img, x=20, y=32, w=160)
     pdf.set_xy(16, 115)
-    pdf.set_font('Helvetica', '', 10)
-    pdf.multi_cell(178, 5, sanitize_text(t_flujo))
+    pdf.set_font('Times', '', 11)
+    pdf.multi_cell(178, 6, sanitize_text(t_flujo))
 
     pdf.set_xy(16, 150)
     pdf.set_font('Helvetica', 'B', 14)
@@ -566,8 +574,8 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.line(16, 158, 194, 158)
     pdf.image(scatter_img, x=20, y=162, w=160)
     pdf.set_xy(16, 245)
-    pdf.set_font('Helvetica', '', 10)
-    pdf.multi_cell(178, 5, sanitize_text(t_tiempos))
+    pdf.set_font('Times', '', 11)
+    pdf.multi_cell(178, 6, sanitize_text(t_tiempos))
 
     # PAGE 5: CAPACIDAD Y CALIDAD
     pdf.add_page()
@@ -580,8 +588,8 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.line(16, 28, 194, 28)
     pdf.image(velocity_img, x=20, y=32, w=160)
     pdf.set_xy(16, 115)
-    pdf.set_font('Helvetica', '', 10)
-    pdf.multi_cell(178, 5, sanitize_text(t_capacidad))
+    pdf.set_font('Times', '', 11)
+    pdf.multi_cell(178, 6, sanitize_text(t_capacidad))
 
     pdf.set_xy(16, 160)
     pdf.set_font('Helvetica', 'B', 14)
@@ -648,8 +656,8 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.line(16, 52, 194, 52)
     
     pdf.set_xy(16, 58)
-    pdf.set_font('Helvetica', '', 10)
-    pdf.multi_cell(178, 5, sanitize_text(t_hallazgos))
+    pdf.set_font('Times', '', 11)
+    pdf.multi_cell(178, 6, sanitize_text(t_hallazgos))
 
     pdf.set_xy(16, 130)
     pdf.set_font('Helvetica', 'B', 14)
@@ -677,8 +685,8 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.line(16, pdf.get_y(), 176, pdf.get_y())
 
     pdf.set_xy(16, 172)
-    pdf.set_font('Helvetica', '', 10)
-    pdf.multi_cell(178, 5, sanitize_text(t_evolucion))
+    pdf.set_font('Times', '', 11)
+    pdf.multi_cell(178, 6, sanitize_text(t_evolucion))
 
     # PAGE 7: MEJORA Y CONCLUSION
     pdf.add_page()
@@ -690,8 +698,8 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.cell(178, 8, sanitize_text("13. Plan de mejora"), 0, 1, 'L')
     pdf.line(16, 28, 194, 28)
     pdf.set_xy(16, 32)
-    pdf.set_font('Helvetica', '', 10)
-    pdf.multi_cell(178, 5, sanitize_text(t_mejora))
+    pdf.set_font('Times', '', 11)
+    pdf.multi_cell(178, 6, sanitize_text(t_mejora))
 
     pdf.set_xy(16, 150)
     pdf.set_font('Helvetica', 'B', 14)
@@ -699,8 +707,8 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.cell(178, 8, sanitize_text("14. Conclusión"), 0, 1, 'L')
     pdf.line(16, 158, 194, 158)
     pdf.set_xy(16, 162)
-    pdf.set_font('Helvetica', '', 10)
-    pdf.multi_cell(178, 5, sanitize_text(t_conclusion))
+    pdf.set_font('Times', '', 11)
+    pdf.multi_cell(178, 6, sanitize_text(t_conclusion))
 
     for img_p in [burnup_img, cfd_img, velocity_img, scatter_img]:
         if img_p and os.path.exists(img_p):
