@@ -31,12 +31,17 @@ async def download_pdf_report(
         user_id = deps.get_current_user_id(request)
         user = deps.check_user_exists(db, user_id)
         user_name = user.nombre or user.email or "Administrador"
+        db_role = user.rol.nombre_rol if getattr(user, "rol", None) else ""
     except Exception:
         user_name = "Valka Hoyos (Administrador)"
+        db_role = ""
+
+    rol_nombre = (request.headers.get("x-view-role") or db_role or "").lower()
+    is_leader = any(k in rol_nombre for k in ("lider", "líder", "manager", "leader"))
 
     try:
         target_pid = resolve_project_id(db, proyecto_id)
-        pdf_bytes = generate_pdf_report_bytes(db, target_pid, usuario_nombre=user_name)
+        pdf_bytes = generate_pdf_report_bytes(db, target_pid, usuario_nombre=user_name, is_leader=is_leader)
         
         filename = f"reporte_kpis_{proyecto_id}.pdf"
         headers = {
@@ -125,6 +130,7 @@ async def get_historical_report(
 async def get_historical_report_range(
     request: Request,
     proyecto_id: str,
+    desarrollador_id: str = None,
     start_date: str = None,
     end_date: str = None,
     all_time: bool = False,
@@ -132,32 +138,23 @@ async def get_historical_report_range(
 ):
     try:
         from app.models.jira import Issue
-        issues = db.query(Issue).filter(Issue.id_proyecto == proyecto_id).all()
+        query = db.query(Issue).filter(Issue.id_proyecto == proyecto_id)
+        if desarrollador_id:
+            query = query.filter(Issue.assignee_id == desarrollador_id)
+        query = query.filter(Issue.resolved_at.isnot(None))
+        
+        if not all_time and start_date and end_date:
+            sd = datetime.strptime(start_date, "%Y-%m-%d").replace(hour=0, minute=0, second=0)
+            ed = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            query = query.filter(Issue.resolved_at >= sd, Issue.resolved_at <= ed)
+            
+        issues = query.all()
         
         total_puntos = 0
         total_tickets = 0
         
         for issue in issues:
-            query = db.query(IssueHistory).filter(
-                IssueHistory.id_jira == issue.id_jira,
-                IssueHistory.campo_modificado.in_(["story_points", "Story point estimate"])
-            )
-            
-            if not all_time and end_date:
-                ed = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
-                query = query.filter(IssueHistory.fecha_cambio <= ed)
-                
-            history_pts = query.order_by(desc(IssueHistory.fecha_cambio)).first()
-            
-            pts = 0
-            if history_pts and history_pts.valor_nuevo:
-                try:
-                    pts = float(history_pts.valor_nuevo)
-                except ValueError:
-                    pass
-            else:
-                pts = issue.story_points
-                
+            pts = float(issue.story_points) if issue.story_points is not None else 0.0
             total_puntos += pts
             total_tickets += 1
             

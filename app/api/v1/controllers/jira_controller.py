@@ -59,6 +59,9 @@ class WebhookResponse(BaseModel):
 from app.core.security import get_current_user
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
+# Router interno para uso de background tasks y schedulers (SIN AUTENTICACIÓN GLOBAL)
+internal_router = APIRouter()
+
 @router.get(
     "/metrics", 
     response_model=JiraMetricsResponse,
@@ -87,9 +90,31 @@ async def get_jira_metrics(
     if cached_data:
         return cached_data
     
-    # 2. Consultar en paralelo a la API REST externa de Jira (con auto-fallback a BD si Jira falla)
+    # 2. Vía rápida: Si existen datos localmente en BD, calcular métricas en milisegundos (< 5ms)
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        db_projects = db.query(models.Proyecto).count()
+        db_issues = db.query(models.Issue).count()
+        if db_projects > 0 or db_issues > 0:
+            done_cnt = db.query(models.Issue).filter(models.Issue.status_actual.ilike("%done%")).count()
+            progress_cnt = db.query(models.Issue).filter(models.Issue.status_actual.ilike("%progress%")).count()
+            critical_cnt = db.query(models.Issue).filter(
+                models.Issue.issue_type.ilike("%bug%"),
+                models.Issue.priority.ilike("%high%")
+            ).count()
+            result_data = {
+                "active_projects": db_projects,
+                "completed_tickets": done_cnt,
+                "in_progress_tickets": progress_cnt,
+                "critical_bugs": critical_cnt
+            }
+            metrics_cache.set(cache_key, result_data)
+            return result_data
+    except Exception:
+        pass
+    
+    # 3. Vía fallback: Consultar en paralelo a la API REST externa de Jira
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
             async def _search_jql(jql_query: str):
                 res = await client.get(f"{base_jira_url}/search/jql?jql={jql_query}&maxResults=0", headers=headers)
                 if res.status_code == 200:
@@ -120,40 +145,61 @@ async def get_jira_metrics(
                 "critical_bugs": bugs_data.get("total", 0)
             }
             
+            # Guardar en caché por 300 segundos (5 minutos)
             metrics_cache.set(cache_key, result_data)
             return result_data
-    except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
-        # Fallback a base de datos local si falla la conexión remota con Jira
-        try:
-            db_projects = db.query(models.Proyecto).count()
-            db_issues = db.query(models.Issue).count()
-            if db_projects > 0 or db_issues > 0:
-                from sqlalchemy import func
-                from app.services.jira_normalizer import DONE_STATUSES, IN_PROGRESS_STATUSES, BUG_TYPES
+        except Exception as e:
+            if isinstance(e, HTTPException):
+                raise e
+            raise HTTPException(status_code=500, detail=str(e))
 
-                done_cnt = db.query(models.Issue).filter(
-                    func.lower(models.Issue.status_actual).in_(DONE_STATUSES)
-                ).count()
-                progress_cnt = db.query(models.Issue).filter(
-                    func.lower(models.Issue.status_actual).in_(IN_PROGRESS_STATUSES)
-                ).count()
-                critical_cnt = db.query(models.Issue).filter(
-                    func.lower(models.Issue.issue_type).in_(BUG_TYPES),
-                    models.Issue.priority.ilike("%high%")
-                ).count()
-                result_data = {
-                    "active_projects": db_projects,
-                    "completed_tickets": done_cnt,
-                    "in_progress_tickets": progress_cnt,
-                    "critical_bugs": critical_cnt
-                }
-                metrics_cache.set(cache_key, result_data)
-                return result_data
-        except Exception:
-            pass
-        raise HTTPException(status_code=500, detail=str(e))
+@internal_router.post(
+    "/sync/internal_cron",
+    response_model=SyncMessageResponse,
+    summary="Internal endpoint para disparar el Cron"
+)
+async def trigger_internal_cron_sync(
+    background_tasks: BackgroundTasks, 
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    POST /api/v1/jira/sync/internal_cron
+    Lanza el proceso de sincronización automática desde APScheduler.
+    Al estar en FastAPI, se beneficia de las BackgroundTasks seguras.
+    """
+    user = deps.check_user_exists(db, user_id)
+    if not log_repo.try_acquire_sync_lock(db):
+        raise HTTPException(status_code=400, detail="Sincronización ya en curso")
+    
+    background_tasks.add_task(run_jira_sync_task, user.id_usuario, "AUTOMATIC")
+    return {"message": "Sincronización iniciada en segundo plano"}
+
+class AutoSyncTogglePayload(BaseModel):
+    enabled: bool
+
+@router.put(
+    "/sync/auto",
+    response_model=SyncMessageResponse,
+    summary="Activar o desactivar sincronización automática"
+)
+async def toggle_auto_sync(
+    payload: AutoSyncTogglePayload,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    PUT /api/v1/jira/sync/auto
+    Activa o desactiva la sincronización programada (cron) para el usuario actual.
+    """
+    user_id = deps.get_current_user_id(request)
+    user = deps.check_user_exists(db, user_id)
+    
+    user.auto_sync_enabled = payload.enabled
+    db.commit()
+    
+    estado = "activada" if payload.enabled else "desactivada"
+    return {"message": f"Sincronización automática {estado} exitosamente"}
 
 @router.post(
     "/sync",
@@ -174,7 +220,7 @@ async def trigger_jira_sync(
     user_id = deps.get_current_user_id(request)
     user = deps.check_user_exists(db, user_id)
     
-    if log_repo.has_running_sync(db):
+    if not log_repo.try_acquire_sync_lock(db):
         if wait:
             # Esperar activamente hasta 15 segundos a que la sincronización en curso termine
             for _ in range(30):
@@ -234,6 +280,51 @@ async def get_sync_logs(
             limit=limit
         )
     return logs
+
+from pydantic import BaseModel
+class CronTimeUpdate(BaseModel):
+    cron_time: str
+
+@router.put(
+    "/sync/cron",
+    summary="Actualizar horario CRON de sincronización automática"
+)
+async def update_cron_time(
+    payload: CronTimeUpdate,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Actualiza la preferencia de horario (ej: '15:36') para el usuario actual.
+    """
+    user_id = deps.get_current_user_id(request)
+    user = deps.check_user_exists(db, user_id)
+    
+    # Validar formato simple HH:MM
+    import re
+    if not re.match(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', payload.cron_time):
+        raise HTTPException(status_code=400, detail="Formato de hora inválido. Usa HH:MM.")
+        
+    user.cron_sync_time = payload.cron_time
+    db.commit()
+    
+    # Reiniciar o actualizar el scheduler
+    try:
+        from app.core.scheduler import _scheduler, scheduled_sync_job
+        from apscheduler.triggers.cron import CronTrigger
+        if _scheduler and _scheduler.running:
+            hour, minute = payload.cron_time.split(":")
+            _scheduler.add_job(
+                scheduled_sync_job,
+                args=[user.id_usuario],
+                trigger=CronTrigger(hour=int(hour), minute=int(minute)),
+                id=f"automatic_jira_sync_{user.id_usuario}",
+                replace_existing=True
+            )
+    except Exception as e:
+        print(f"Error reprogramando tarea CRON dinámicamente: {e}")
+        
+    return {"message": "Horario actualizado con éxito", "cron_sync_time": user.cron_sync_time}
 
 @router.post(
     "/webhook",
@@ -497,7 +588,7 @@ async def execute_issue_transition(
         
         # 2. Ejecutar la transición en Jira Cloud
         try:
-            await JiraDatasource.post_issue_transition(client, base_jira_url, headers, issue_key, trans_id_to_exec)
+            await JiraDatasource.execute_issue_transition(client, base_jira_url, headers, issue_key, trans_id_to_exec)
         except Exception as exec_err:
             raise HTTPException(status_code=502, detail=f"Jira rechazó la transición: {str(exec_err)}")
         
@@ -526,9 +617,8 @@ async def execute_issue_transition(
                     
         return {
             "success": True,
-            "status": "success",
-            "new_status": updated_status,
             "issue_key": issue_key,
+            "status": updated_status,
             "message": f"Estado de {issue_key} actualizado a '{updated_status}' en Jira Cloud."
         }
 
@@ -704,4 +794,4 @@ async def reassign_issues_bulk(
         "total_successful": success_count,
         "results": results
     }
-
+

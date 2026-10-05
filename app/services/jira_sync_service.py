@@ -489,6 +489,7 @@ async def async_run_jira_sync(user_id: int, tipo_sincronizacion: str = "MANUAL")
                 "detalle_error": f"{error_msg}\n{traceback_str[:300]}"
             })
     finally:
+        log_repo.release_sync_lock(db)
         db.close()
 
 def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
@@ -496,17 +497,26 @@ def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
     Función síncrona/hilo seguro para ejecutar la sincronización ETL.
     Funciona de forma transparente tanto en scripts independientes como en background tasks de FastAPI.
     """
+    import sys
+    if sys.platform == 'win32':
+        import asyncio
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        
     try:
         loop = asyncio.get_running_loop()
+        print(f"[run_jira_sync_task] Found running loop: {loop}")
     except RuntimeError:
         loop = None
+        print("[run_jira_sync_task] No running loop found.")
 
     if loop and loop.is_running():
+        print("[run_jira_sync_task] Executing via ThreadPoolExecutor...")
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(lambda: asyncio.run(async_run_jira_sync(user_id, tipo_sincronizacion)))
             return future.result()
     else:
+        print("[run_jira_sync_task] Executing via direct asyncio.run()...")
         return asyncio.run(async_run_jira_sync(user_id, tipo_sincronizacion))
 
 async def run_jira_sync(user_id: int, db: Session, tipo_sincronizacion: str = "MANUAL"):

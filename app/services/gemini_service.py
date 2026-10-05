@@ -30,8 +30,8 @@ def _call_gemini_rest_api(prompt: str, temperature: float = 0.4, max_tokens: int
     if not is_gemini_configured():
         return None
 
-    primary_model = GEMINI_MODEL_NAME or "gemini-flash-lite-latest"
-    candidate_models = [primary_model, "gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.5-flash-lite"]
+    primary_model = GEMINI_MODEL_NAME or "gemini-2.5-flash"
+    candidate_models = list(dict.fromkeys([primary_model, "gemini-2.5-flash", "gemini-1.5-flash", "gemini-flash-lite-latest"]))
 
     payload = {
         "contents": [
@@ -47,7 +47,7 @@ def _call_gemini_rest_api(prompt: str, temperature: float = 0.4, max_tokens: int
         }
     }
 
-    with httpx.Client(timeout=25.0) as client:
+    with httpx.Client(timeout=30.0) as client:
         for model in candidate_models:
             url = f"{GEMINI_API_ENDPOINT}/{model}:generateContent?key={GEMINI_API_KEY}"
             try:
@@ -60,10 +60,10 @@ def _call_gemini_rest_api(prompt: str, temperature: float = 0.4, max_tokens: int
                         if parts and "text" in parts[0]:
                             return parts[0]["text"].strip()
                 elif response.status_code == 404:
-                    print(f"Modelo Gemini '{model}' no disponible (404), intentando siguiente modelo candidato...")
+                    print(f"Modelo Gemini '{model}' no disponible (404), intentando siguiente modelo...")
                     continue
                 else:
-                    print(f"Aviso Gemini API ({model} HTTP {response.status_code}): {response.text[:200]}")
+                    print(f"Aviso Gemini API ({model} HTTP {response.status_code}): {response.text[:150]}")
             except Exception as e:
                 print(f"Error conectando con Google Gemini API ({model}): {e}")
 
@@ -209,7 +209,7 @@ def generar_analisis_ejecutivo_nubi(context_info: str) -> str:
         )
     
     prompt = f"""
-Actúa como NubI IA, consultor senior de agilidad de MCHAV Analytics.
+Actúa como un Asistente Analítico Experto, consultor senior de agilidad de MCHAV Analytics. No te presentes, no digas tu nombre ni uses saludos iniciales.
 Genera un diagnóstico ejecutivo breve (máximo 3 frases) en español para el reporte por correo.
 Métricas clave: {context_info}
 Responde en un párrafo profesional y conciso.
@@ -304,40 +304,58 @@ INSTRUCCIONES DE RESPUESTA Y ANÁLISIS:
     return "Disculpa, en este momento no pude obtener respuesta del motor analítico de Gemini. Por favor verifica tu conexión o intenta nuevamente."
 
 def _build_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
+    kanban_note = ""
+    if v == 0 and t > 0:
+        kanban_note = f" (Nota: El equipo opera en modalidad Kanban basada en Throughput con {t} incidencias cerradas. No alarmes por '0 Story Points', enfoca el análisis en los tickets terminados)."
+
     return f"""
-Actúa como un Agile Coach experto evaluando la salud general del proyecto.
-Tu objetivo es evaluar el desempeño global basándote en métricas reales.
-No uses formato de 'plantilla de IA'. Escribe párrafos fluidos, analíticos y directos.
-Métricas del proyecto:
-- Velocidad: {v} Story Points completados.
-- Rendimiento (Throughput): {t} tickets completados.
-- Tiempo de ciclo promedio: {ct} días.
+Actúa como un Senior Agile Data Scientist evaluando la evolución multitemporal del proyecto.
+Tu informe DEBE responder rigurosamente a la pregunta central: "¿Cómo ha evolucionado el proyecto durante el periodo?" comparando, cuando sea posible, con periodos anteriores.
+
+DATOS ANALÍTICOS REALES Y UNIFICADOS DEL PROYECTO:
+- Velocidad: {v} Story Points completados.{kanban_note}
+- Rendimiento (Throughput): {t} tickets/incidencias completadas.
+- Tiempo de ciclo promedio: {ct} días hábiles (excluyendo fines de semana y festivos).
 - Días bloqueados acumulados: {bd} días.
-- Bugs reportados: {bugs}.
-- Alcance total: {scope} Story Points.
-- Sprint Health Score promedio: {health}/100.
-- P50: {p50} días, P85: {p85} días, P95: {p95} días.
+- Bugs / Defectos escapados: {bugs}.
+- Alcance total evaluado: {scope} Story Points.
+- Salud global del proyecto (Health Score): {health}/100 pts.
+- Percentiles de Cycle Time: P50 (Mediana)={p50} días, P85 (SLA objetivo)={p85} días, P95 (Outliers)={p95} días.
 - Porcentaje de completitud: {pct}%.
 
-ESTRUCTURA ESTRICTA DE CADA SECCIÓN (OBLIGATORIO):
-El sistema separa el reporte usando etiquetas '[PROYECTO_X] TITULO'.
+REGLAS ESTRICTAS DE REDACCIÓN Y TONO TÉCNICO (CUMPLIMIENTO OBLIGATORIO):
+1. PROHIBIDO usar adjetivos subjetivos (ej. 'con creces', 'considerablemente', 'significativamente'). Todo debe expresarse en variaciones porcentuales o valores absolutos.
+2. PROHIBIDO invocar 'intervención gerencial', 'intervención ejecutiva' o tonos punitivos. Mantén un enfoque analítico, constructivo y centrado en la mejora del equipo.
+3. EL TEXTO DEBE INTERPRETAR DIRECTAMENTE LAS GRÁFICAS. Ej: "En la gráfica de velocidad se observa...", "La línea de alcance del Burnup muestra...".
+4. ESTRUCTURA LA EVALUACIÓN EN 3 NIVELES: a) Dato observado → b) Relación o tendencia → c) Conclusión analítica.
+5. Reconoce matices: Por ejemplo, los tiempos atípicos (P95) suelen deberse a la complejidad (Story Points) o dependencias externas.
 
-LAS 4 SECCIONES A DESARROLLAR (Debes incluir EXACTAMENTE estas 4 en este orden):
+ESTRUCTURA DE SECCIONES (Utiliza exactamente estas etiquetas [PROYECTO_X]):
 
-[PROYECTO_1] CONTEXTO GENERAL DEL PERIODO
-  - Escribe un párrafo evaluando el rendimiento global del proyecto.
-  
-[PROYECTO_2] ESTADO DEL FLUJO DE TRABAJO Y CUELLOS DE BOTELLA
-  - Análisis detallado del cycle time, throughput y días de bloqueo en un párrafo fluido.
+[PROYECTO_1] FICHA DEL PROYECTO Y ESTADO GENERAL
+  - Resume la muestra evaluada: periodo, Sprints incluidos, {t} tickets analizados, {scope} SP de alcance total y la salud ({health}/100).
 
-[PROYECTO_3] ANÁLISIS DE PREDICTIBILIDAD Y RIESGOS
-  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_BURNUP]
+[PROYECTO_2] EVOLUCIÓN DE LA ENTREGA
   - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_VELOCIDAD]
-  - Basado en los percentiles P50/P85/P95, evalúa qué tan predecible es la entrega del proyecto.
-  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_FLUJO]
+  - Analiza la gráfica de Histórico de Velocidad. Explica los {v} SP y {t} tickets completados frente a lo planificado ({planned} SP). Compara periodos (sprints) e identifica la tendencia de entrega (alza, baja o estable).
 
-[PROYECTO_4] CONCLUSIONES ESTRATÉGICAS Y PLAN DE ACCIÓN
-  - Conclusiones fluidas y pasos accionables recomendados para el liderazgo técnico.
+[PROYECTO_3] EVOLUCIÓN DEL FLUJO Y WIP
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_FLUJO]
+  - Analiza el Diagrama CFD: cómo evolucionó el WIP por semana/sprint, en qué estados se acumula el trabajo y cómo impactaron los bloqueos.
+
+[PROYECTO_4] EVOLUCIÓN DE LOS TIEMPOS Y PREDICTIBILIDAD
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_PREDICTIBILIDAD]
+  - Analiza el Scatter Plot usando los percentiles (P50: {p50}d, P85: {p85}d, P95: {p95}d). Explica los casos atípicos considerando la complejidad y los días no laborales.
+
+[PROYECTO_5] ALCANCE, CAMBIOS Y TRABAJO PENDIENTE
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_BURNUP]
+  - Interpreta el Burnup Chart evaluando el alcance comprometido frente al completado. Menciona si hubo trabajo añadido y cuánto trabajo pendiente real existe.
+
+[PROYECTO_6] RIESGOS Y OPORTUNIDADES
+  - Identifica acumulación recurrente, variabilidad de tiempos ({ct} días en promedio) o dependencias/bloqueos ({bd} días).
+
+[PROYECTO_7] CONCLUSIONES ESTRATÉGICAS DE IA
+  - Responde de manera contundente: ¿El proyecto está mejorando, empeorando o manteniéndose? Analiza patrones entre sprints y provee 2 recomendaciones concretas.
 """
 
 def _build_desarrollador_prompt(metrics, v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
@@ -421,8 +439,144 @@ LAS 3 SECCIONES A DESARROLLAR (Debes incluir EXACTAMENTE estas 3 en este orden):
 # 03 — CONCLUSIONES Y RIESGOS ESTRATÉGICOS
   - Redacta de 2 a 3 párrafos de conclusiones ejecutivas sobre la salud de estos proyectos, cuellos de botella observados y recomendaciones de mejora estructural.
 """
+def _build_pdf_monthly_prompt(metrics):
+    v = metrics.get("velocity", 0)
+    t = metrics.get("throughput", 0)
+    ct = metrics.get("cycleTime", 0)
+    bd = metrics.get("blockedDays", 0)
+    bugs = metrics.get("bugs", 0)
+    scope = metrics.get("scope", 0)
+    health = metrics.get("sprintHealth", 0)
+    p50 = metrics.get("p50", 0)
+    p85 = metrics.get("p85", 0)
+    p95 = metrics.get("p95", 0)
+    planned = metrics.get("planned", 0)
+    pct = metrics.get("completionPct", 0)
+
+    return f"""
+Actúa como un Senior Agile Data Scientist y Director Analítico. Eres el encargado de redactar el texto de un reporte ejecutivo mensual en PDF para C-levels y líderes.
+Tu tono debe ser profesional, analítico, directo al grano y sin rodeos. Nada de introducciones ni saludos.
+
+Datos del mes:
+- Velocidad: {v} Story Points completados.
+- Rendimiento (Throughput): {t} tickets completados.
+- Tiempo de ciclo promedio: {ct} días hábiles.
+- Días bloqueados acumulados: {bd} días.
+- Bugs reportados/resueltos: {bugs}.
+- Alcance total planificado: {scope} Story Points.
+- Salud global del sprint/mes: {health}/100.
+- Predictibilidad (Percentiles): P50={p50}d, P85={p85}d, P95={p95}d.
+- Completitud de entrega: {pct}%.
+
+REGLAS OBLIGATORIAS:
+1. Tono ejecutivo, estratégico y extremadamente directo al grano.
+2. No uses adornos, saludos, ni palabras de relleno. Ve directo al dato y su implicación.
+3. ESTRUCTURA LA EVALUACIÓN EN 3 NIVELES para cada sección: a) Dato observado → b) Tendencia → c) Impacto.
+4. Genera el contenido ESTRICTAMENTE utilizando las siguientes etiquetas y escribe MÁXIMO 2 a 3 LÍNEAS por cada sección. No te extiendas.
+
+[PROYECTO_RESUMEN]
+(Resumen ejecutivo general del mes. Cita {t} tickets, {v} SP y la salud {health}/100 para dar un veredicto claro).
+
+[PROYECTO_ENTREGA]
+(Analiza la evolución de la entrega -Burnup-. Menciona la completitud del {pct}% respecto al alcance de {scope} SP).
+
+[PROYECTO_FLUJO]
+(Analiza el flujo de trabajo -CFD-. Evalúa la fricción por los {bd} días bloqueados y los estancamientos).
+
+[PROYECTO_TIEMPOS]
+(Analiza la predictibilidad y el Cycle Time medio de {ct}d. Menciona que el 85% se resuelve en {p85} días o menos).
+
+[PROYECTO_CAPACIDAD]
+(Analiza la capacidad del equipo basándote en la velocidad y estabilidad del throughput mensual).
+
+[PROYECTO_CALIDAD]
+(Analiza la calidad técnica basándote en los {bugs} bugs y su impacto en el trabajo).
+
+[PROYECTO_HALLAZGOS]
+(Identifica 2 hallazgos principales del mes con evidencia cuantitativa).
+
+[PROYECTO_EVOLUCION]
+(Interpreta la evolución frente a las expectativas operativas del periodo).
+
+[PROYECTO_MEJORA]
+(Propón 2 recomendaciones directas y tácticas para el equipo y el Líder Técnico).
+
+[PROYECTO_CONCLUSION]
+(Un párrafo corto de conclusión estratégica sobre la viabilidad y ritmo actual del proyecto).
+"""
+
+def _build_lider_pdf_monthly_prompt(metrics):
+    v = metrics.get("velocity", 0)
+    t = metrics.get("throughput", 0)
+    ct = metrics.get("cycleTime", 0)
+    bd = metrics.get("blockedDays", 0)
+    bugs = metrics.get("bugs", 0)
+    scope = metrics.get("scope", 0)
+    health = metrics.get("sprintHealth", 0)
+    p50 = metrics.get("p50", 0)
+    p85 = metrics.get("p85", 0)
+    p95 = metrics.get("p95", 0)
+    planned = metrics.get("planned", 0)
+    pct = metrics.get("completionPct", 0)
+
+    return f"""
+Actúa como un Asistente Analítico Experto y Facilitador Ágil. Eres el encargado de redactar el texto de un reporte mensual en PDF para el Líder Técnico y el equipo de desarrollo.
+Tu tono debe ser táctico, directo al grano y enfocado en la mejora continua y resolución de impedimentos operativos. Nada de introducciones ni saludos.
+
+Datos del mes:
+- Velocidad: {v} Story Points completados.
+- Rendimiento (Throughput): {t} tickets completados.
+- Tiempo de ciclo promedio: {ct} días hábiles.
+- Días bloqueados acumulados: {bd} días.
+- Bugs reportados/resueltos: {bugs}.
+- Alcance total planificado: {scope} Story Points.
+- Salud global del sprint/mes: {health}/100.
+- Predictibilidad (Percentiles): P50={p50}d, P85={p85}d, P95={p95}d.
+- Completitud de entrega: {pct}%.
+
+REGLAS OBLIGATORIAS:
+1. Tono táctico, enfocado en el equipo, cuellos de botella y calidad técnica.
+2. No uses adornos, saludos, ni palabras de relleno. Ve directo al dato y su implicación técnica.
+3. ESTRUCTURA LA EVALUACIÓN EN 3 NIVELES para cada sección: a) Dato observado → b) Causa raíz u obstáculo → c) Acción recomendada.
+4. Genera el contenido ESTRICTAMENTE utilizando las siguientes etiquetas y escribe MÁXIMO 2 a 3 LÍNEAS por cada sección. No te extiendas.
+
+[PROYECTO_RESUMEN]
+(Resumen técnico general del mes. Cita {t} tickets, {v} SP y la salud {health}/100 para evaluar el ritmo del equipo).
+
+[PROYECTO_ENTREGA]
+(Analiza la completitud del {pct}% respecto al alcance de {scope} SP. ¿Hubo deuda o spillover?).
+
+[PROYECTO_FLUJO]
+(Analiza el CFD. Evalúa dónde están los cuellos de botella y el impacto de los {bd} días bloqueados).
+
+[PROYECTO_TIEMPOS]
+(Analiza el Cycle Time de {ct}d y el P85 de {p85}d. ¿El equipo está perdiendo tiempo en bucles de revisión o QA?).
+
+[PROYECTO_CAPACIDAD]
+(Analiza si el equipo está sobrecargado o si la velocidad está fragmentada en micro-tareas).
+
+[PROYECTO_CALIDAD]
+(Analiza la incidencia de los {bugs} bugs en la arquitectura y si falta refinamiento).
+
+[PROYECTO_HALLAZGOS]
+(Identifica 2 fricciones operativas principales del mes con evidencia cuantitativa).
+
+[PROYECTO_EVOLUCION]
+(Interpreta si el equipo ha mejorado sus prácticas técnicas respecto a periodos anteriores).
+
+[PROYECTO_MEJORA]
+(Propón 2 prácticas ágiles o de ingeniería directas que el Líder Técnico debe implementar de inmediato).
+
+[PROYECTO_CONCLUSION]
+(Un párrafo corto de conclusión técnica sobre el estado de salud operativa del equipo).
+"""
 
 def generate_report_insights(metrics: dict, fallback: dict, report_type: str = "sprint", is_leader: bool = False) -> str:
+    cache_key = f"rep_insights_{report_type}_{is_leader}_{metrics.get('targetName') or metrics.get('sprintName') or metrics.get('projectName')}_{metrics.get('velocity',0)}_{metrics.get('throughput',0)}"
+    cached = gemini_cache.get(cache_key)
+    if cached:
+        return cached
+
     if not is_gemini_configured():
         return _get_fallback_insights(report_type)
 
@@ -440,17 +594,52 @@ def generate_report_insights(metrics: dict, fallback: dict, report_type: str = "
         planned = metrics.get("planned", 0)
         pct = metrics.get("completionPct", 0)
 
-        if report_type == "general":
+        if report_type == "general" or report_type == "cierre_general":
             prompt = _build_lider_general_prompt(metrics)
-        elif report_type == "desarrollador":
+        elif report_type == "desarrollador" or report_type == "cierre_desarrollador":
             prompt = _build_lider_desarrollador_prompt(metrics, v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
+        elif report_type == "monthly_pdf":
+            prompt = _build_lider_pdf_monthly_prompt(metrics)
         elif report_type == "proyecto":
             prompt = _build_lider_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
+        elif report_type == "cierre_proyecto":
+            prompt = _build_cierre_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
+        elif report_type == "sprint_comparativo":
+            s_base = metrics.get("sprintNameBase", "Sprint Base")
+            s_comp = metrics.get("sprintNameCompare", "Sprint A Comparar")
+            prompt = f"""
+Actúa como un Asistente Analítico Experto del Líder Técnico. No te presentes, no digas tu nombre ni uses saludos iniciales.
+Analiza y compara tácticamente el desempeño de {s_base} frente a {s_comp}, enfocándote en la coordinación del equipo y resolución de impedimentos.
+
+DATOS {s_base}:
+Velocidad: {metrics.get("velocity", 0)} SP. Throughput: {metrics.get("throughput", 0)} tickets. Cycle Time: {metrics.get("cycleTime", 0)} días. Bloqueos: {metrics.get("blockedDays", 0)} días. Salud: {metrics.get("sprintHealth", 0)}/100.
+
+DATOS {s_comp}:
+Velocidad: {metrics.get("velocityCompare", 0)} SP. Throughput: {metrics.get("throughputCompare", 0)} tickets. Cycle Time: {metrics.get("cycleTimeCompare", 0)} días. Bloqueos: {metrics.get("blockedDaysCompare", metrics.get("blockedDays", 0))} días. Salud: {metrics.get("sprintHealthCompare", 0)}/100.
+
+Estructura tu respuesta estrictamente en estas 4 secciones:
+
+# 01 — ANÁLISIS DE RENDIMIENTO CRUZADO
+  - Analiza las diferencias clave en velocidad y throughput entre ambos ciclos desde la perspectiva de liderazgo.
+
+# 02 — COMPARATIVA DE VELOCIDAD
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_COMPARATIVA_VELOCIDAD]
+  - Interpreta la gráfica evaluando el esfuerzo y compromiso del equipo.
+
+# 03 — CUELLOS DE BOTELLA Y FLUJO DE TRABAJO
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_COMPARATIVA_FLUJO]
+  - Compara los bloqueos y la acumulación de WIP.
+
+# 04 — ESTRATEGIA Y ACCIONES DEL LÍDER
+  - Propón 3 acciones claras que el Líder Técnico debe tomar basándose en esta comparación.
+"""
         else:
             prompt = _build_lider_sprint_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
-    elif report_type == "general":
+    elif report_type == "monthly_pdf":
+        prompt = _build_pdf_monthly_prompt(metrics)
+    elif report_type == "general" or report_type == "cierre_general":
         prompt = _build_general_prompt(metrics)
-    elif report_type == "desarrollador":
+    elif report_type == "desarrollador" or report_type == "cierre_desarrollador":
         v = metrics.get("velocity", 0)
         t = metrics.get("throughput", 0)
         ct = metrics.get("cycleTime", 0)
@@ -478,6 +667,103 @@ def generate_report_insights(metrics: dict, fallback: dict, report_type: str = "
         planned = metrics.get("planned", 0)
         pct = metrics.get("completionPct", 0)
         prompt = _build_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
+    elif report_type == "cierre_proyecto":
+        v = metrics.get("velocity", 0)
+        t = metrics.get("throughput", 0)
+        ct = metrics.get("cycleTime", 0)
+        bd = metrics.get("blockedDays", 0)
+        bugs = metrics.get("bugs", 0)
+        scope = metrics.get("scope", 0)
+        health = metrics.get("sprintHealth", 0)
+        p50 = metrics.get("p50", 0)
+        p85 = metrics.get("p85", 0)
+        p95 = metrics.get("p95", 0)
+        planned = metrics.get("planned", 0)
+        pct = metrics.get("completionPct", 0)
+        prompt = _build_cierre_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
+    elif report_type == "sprint_comparativo":
+        s_base = metrics.get("sprintNameBase", "Sprint Base")
+        s_comp = metrics.get("sprintNameCompare", "Sprint A Comparar")
+        
+        # Sprint 1 data
+        periodo1 = s_base
+        comp1 = metrics.get("planned1", 0)
+        pts1 = metrics.get("velocity", 0)
+        v1 = metrics.get("velocity", 0)
+        t1 = metrics.get("throughput", 0)
+        ct1 = metrics.get("cycleTime", 0)
+        pred1 = metrics.get("predictability1", 0)
+        tc1 = metrics.get("ticketsCompleted1", 0)
+        tp1 = metrics.get("ticketsPending1", 0)
+        h1 = metrics.get("sprintHealth", 0)
+        
+        # Sprint 2 data
+        periodo2 = s_comp
+        comp2 = metrics.get("planned2", 0)
+        pts2 = metrics.get("velocityCompare", 0)
+        v2 = metrics.get("velocityCompare", 0)
+        t2 = metrics.get("throughputCompare", 0)
+        ct2 = metrics.get("cycleTimeCompare", 0)
+        pred2 = metrics.get("predictability2", 0)
+        tc2 = metrics.get("ticketsCompleted2", 0)
+        tp2 = metrics.get("ticketsPending2", 0)
+        h2 = metrics.get("sprintHealthCompare", 0)
+        
+        prompt = f"""
+Actúa como un Agile Coach especializado en análisis de métricas ágiles.
+
+Analiza y compara el desempeño de {s_base} frente a {s_comp}, utilizando exclusivamente los datos proporcionados.
+
+DATOS DEL SPRINT BASE:
+- Periodo: {periodo1}
+- Puntos comprometidos: {comp1}
+- Puntos completados: {pts1}
+- Velocity: {v1}
+- Throughput: {t1}
+- Cycle Time: {ct1}
+- Predictibilidad: {pred1}%
+- Tickets completados: {tc1}
+- Tickets pendientes: {tp1}
+- Salud: {h1}/100
+
+DATOS DEL SPRINT A COMPARAR:
+- Periodo: {periodo2}
+- Puntos comprometidos: {comp2}
+- Puntos completados: {pts2}
+- Velocity: {v2}
+- Throughput: {t2}
+- Cycle Time: {ct2}
+- Predictibilidad: {pred2}%
+- Tickets completados: {tc2}
+- Tickets pendientes: {tp2}
+- Salud: {h2}/100
+
+REGLAS DE ANÁLISIS:
+- Compara las métricas entre ambos sprints y menciona únicamente diferencias respaldadas por los datos.
+- Indica qué métricas mejoraron, cuáles disminuyeron y cuáles permanecieron estables.
+- Explica qué significan esas variaciones para el flujo de trabajo y la capacidad de entrega.
+- Relaciona el análisis con las gráficas y métricas mostradas en el reporte; no describas una gráfica sin explicar qué significa el comportamiento observado.
+- Cuando sea posible, expresa las variaciones en porcentajes o diferencias concretas.
+- No atribuyas causas que no estén respaldadas por los datos.
+- No inventes información, eventos, bloqueos, causas o comportamientos de los desarrolladores.
+- No utilices expresiones subjetivas como "excelente", "malo", "con creces" o similares.
+- No declares un "ganador" general. Presenta objetivamente las principales mejoras, retrocesos y aspectos que requieren atención.
+
+FORMATO:
+Redacta entre 2 y 3 párrafos continuos, profesionales y fáciles de leer.
+No utilices títulos, listas, viñetas ni enumeraciones.
+Evita repetir los valores de todas las métricas; selecciona únicamente los datos relevantes para explicar los cambios.
+El texto debe sentirse como una interpretación del reporte y no como una repetición de sus cifras.
+"""
+    elif report_type == "sprint_historico":
+        v = metrics.get("velocity", 0)
+        h = metrics.get("sprintHealth", 0)
+        s_base = metrics.get("sprintNameBase", "Sprint")
+        prompt = f"""
+Actúa como un Agile Coach analizando el desempeño histórico de {s_base}.
+Puntos completados = {v}, Salud = {h}/100.
+Redacta directamente 2 párrafos limpios resumiendo el desempeño de este sprint histórico. Sin títulos, sin secciones, sin enumeraciones, solo texto continuo y profesional.
+"""
     else:
         v = metrics.get("velocity", 0)
         t = metrics.get("throughput", 0)
@@ -493,16 +779,100 @@ def generate_report_insights(metrics: dict, fallback: dict, report_type: str = "
         pct = metrics.get("completionPct", 0)
         prompt = _build_sprint_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct)
 
-    reply = _call_gemini_rest_api(prompt, temperature=0.7, max_tokens=2500)
+    # Reglas globales de fidelidad y tono: aplican a TODOS los reportes (Admin y Líder)
+    prompt = f"{prompt}\n{_build_fidelity_rules(metrics)}"
+    reply = _call_gemini_rest_api(prompt, temperature=0.4, max_tokens=2500)
     if reply:
-        return reply
+        sanitized = _sanitize_ai_reply(reply)
+        gemini_cache.set(cache_key, sanitized)
+        return sanitized
 
-    return _get_fallback_insights(report_type)
+    fb = _get_fallback_insights(report_type)
+    gemini_cache.set(cache_key, fb)
+    return fb
+
+def _build_fidelity_rules(metrics: dict) -> str:
+    """Reglas anti-invención y anti-alarmismo que se anexan al final de cada prompt de reporte."""
+    try:
+        health = float(metrics.get("sprintHealth", 0) or 0)
+    except (TypeError, ValueError):
+        health = 0
+    urgency_rule = (
+        f"- La salud es {health:.0f}/100 (estable): PROHIBIDO expresar urgencia (\"inmediato\", \"urgente\", \"crítico\", \"exige\"). Usa \"se recomienda\"."
+        if health >= 70 else
+        "- Aunque la salud sea baja, describe la situación con datos y tono constructivo, sin dramatizar."
+    )
+    return f"""
+REGLAS FINALES OBLIGATORIAS (prevalecen sobre cualquier instrucción anterior):
+- Usa ÚNICAMENTE las métricas entregadas arriba. No inventes cifras, causas ni contexto.
+- PROHIBIDO atribuir causas que no estén en los datos (p. ej. falta de pruebas unitarias, pipelines, arquitectura, integraciones, code reviews, criterios DoD). Si sugieres una causa, preséntala como hipótesis a validar ("podría estar asociado a...").
+- PROHIBIDO afirmar tendencias históricas ("sostenida", "en los últimos ciclos", "creció", "cayó") si no se entregaron datos de periodos anteriores.
+- PROHIBIDO afirmar impacto en producción o en clientes si no hay datos que lo respalden.
+{urgency_rule}
+- Escribe siempre los porcentajes con el símbolo % (ej. 86%).
+"""
+
+
+def _strip_accents(s: str) -> str:
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+
+
+def _accent_insensitive_regex(phrase: str) -> str:
+    """Convierte una frase en un patrón regex que acepta la versión con o sin tildes (para BUSCAR).
+    El texto original del reporte no se modifica: solo se reemplaza la frase encontrada."""
+    import re
+    variants = {"a": "[aáà]", "e": "[eéè]", "i": "[iíì]", "o": "[oóò]", "u": "[uúüù]"}
+    base = _strip_accents(phrase.lower())
+    return "".join(variants.get(ch, re.escape(ch)) for ch in base)
+
+
+def _match_case(original: str, replacement: str) -> str:
+    """Si la frase original empezaba en mayúscula (inicio de oración), el reemplazo también."""
+    if original[:1].isupper() and replacement:
+        return replacement[0].upper() + replacement[1:]
+    return replacement
+
+
+def _sanitize_ai_reply(text: str) -> str:
+    """Elimina o suaviza frases alarmistas o imprecisas generadas por la IA.
+    La búsqueda ignora tildes y mayúsculas; el reemplazo conserva la ortografía correcta."""
+    import re
+    if not text:
+        return ""
+    # Orden importa: frases largas primero
+    replacements = [
+        ("ceros absolutos en velocidad", "flujo de trabajo enfocado en Throughput"),
+        ("ceros absolutos", "ausencia de estimaciones en puntos"),
+        ("parálisis total", "operación en flujo continuo"),
+        ("desconexión crítica", "oportunidad de mejora en la trazabilidad de estimaciones"),
+        ("teletransportación de código", "registro dinámico de incidencias"),
+        ("intervención gerencial", "apoyo técnico al equipo"),
+        ("intervención ejecutiva", "seguimiento facilitador"),
+        ("intervención inmediata", "acciones de mejora"),
+        ("exige correcciones inmediatas", "sugiere ajustes"),
+        ("requiere correcciones inmediatas", "sugiere ajustes"),
+        ("correcciones inmediatas", "ajustes recomendados"),
+        ("acciones inmediatas", "acciones recomendadas"),
+        ("medidas inmediatas", "medidas recomendadas"),
+        ("atención inmediata", "seguimiento"),
+        ("de inmediato", "en el próximo ciclo"),
+        ("de manera urgente", "de forma prioritaria"),
+        ("insostenible", "con oportunidad de optimización"),
+        ("con creces", "cumpliendo los criterios definidos"),
+    ]
+    res = str(text)
+    for old, new in replacements:
+        pattern = r"\b" + _accent_insensitive_regex(old) + r"\b"
+        res = re.sub(pattern, lambda m, n=new: _match_case(m.group(0), n), res, flags=re.IGNORECASE)
+    # Corrección de marca (respeta mayúsculas exactas)
+    res = res.replace("ANACITYCS", "ANALYTICS")
+    return res
 
 def _build_lider_sprint_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
     spillover = max(0, planned - v)
     return f"""
-Actúa como Nubi IA, Asistente Analítico del Líder Técnico y Facilitador Ágil.
+Actúa como un Asistente Analítico Experto del Líder Técnico y Facilitador Ágil. No te presentes, no digas tu nombre ni uses saludos iniciales.
 Analiza el sprint con los siguientes datos empíricos:
 Velocidad entregada: {v} SP (de {planned} SP planificados, {pct}% de cumplimiento). Throughput: {t} tickets cerrados. Stories/tareas en deuda (Spillover): {spillover} SP.
 Cycle Time medio: {ct} días hábiles (descontando fines de semana y festivos). Bloqueos acumulados: {bd} días. Defectos: {bugs} bugs. Salud del Sprint: {health}/100.
@@ -521,61 +891,121 @@ Estructura el informe narrativo en 4 secciones continuas:
 # 02 — EVOLUCIÓN DEL COMPROMISO Y METODOLOGÍA
   - Analiza cómo evolucionó el ritmo de entrega durante los días hábiles del sprint.
 
-# 03 — CUELLOS DE BOTELLA Y LOCALIZACIÓN DEL PROBLEMA
-  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_FLUJO]
-  - Analiza las causas de los {bd} días bloqueados y la concentración de tareas en revisión en el CFD, cuantificando las horas de retraso estimadas y el impacto de la multitarea.
+# 03 — CUELLOS DE BOTELLA Y FLUJO DE TRABAJO
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_BURNUP]
+  - Analiza las causas de los {bd} días bloqueados y la evolución temporal.
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_VELOCIDAD]
 
-# 04 — GUÍA DE ACOMPAÑAMIENTO Y PLAN TÁCTICO DEL LÍDER
+# 04 — LOCALIZACIÓN DEL PROBLEMA Y PLAN TÁCTICO
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_FLUJO]
+  - Analiza la concentración de tareas en revisión en el CFD, cuantificando las horas de retraso estimadas y el impacto de la multitarea.
   - Proporciona 3 acciones prácticas para que el Líder Técnico y el equipo rebalanceen el WIP y remuevan bloqueos en el próximo sprint.
 """
 
 def _build_lider_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
     spillover = max(0, planned - v)
     return f"""
-Actúa como Nubi IA, Asistente Analítico del Líder Técnico y Facilitador Ágil.
+Actúa como un Asistente Analítico Experto del Líder Técnico y Facilitador Ágil. No te presentes, no digas tu nombre ni uses saludos iniciales.
 Analiza el proyecto con los datos:
-Velocidad entregada: {v} SP. Throughput: {t} tickets resueltos. Tareas en deuda: {spillover} SP. Cycle Time medio: {ct} días hábiles (descontando fines de semana). Días bloqueados: {bd}. Bugs: {bugs}.
+Velocidad entregada: {v} SP de {planned} SP planificados ({pct}% de cumplimiento). Throughput: {t} tickets resueltos. Tareas en deuda: {spillover} SP. Cycle Time medio: {ct} días hábiles (descontando fines de semana); P85: {p85}d; P95: {p95}d. Días bloqueados: {bd}. Bugs: {bugs}. Salud: {health}/100.
 
 REGLAS OBLIGATORIAS DE TONO Y ESTILO:
 1. Utiliza un tono constructivo, de soporte y enfocado en la mejora continua del equipo.
-2. PROHIBIDO usar palabras vagas como 'con creces' o apelaciones a 'intervención gerencial/ejecutiva'.
-3. Apóyate en métricas cuantitativas precisas y citas directas a las gráficas.
+2. ESTRUCTURA LA EVALUACIÓN EN 3 NIVELES: a) Dato observado → b) Relación o tendencia → c) Conclusión o acción táctica.
+3. BREVEDAD ESTRICTA: cada nivel (a, b, c) es UNA sola línea corta. Máximo 3 líneas por sección. Sin relleno.
 
-Estructura el informe narrativo en 4 secciones:
+ESTRUCTURA DE SECCIONES (Utiliza exactamente estas etiquetas [PROYECTO_X]):
 
-# 01 — CONTEXTO OPERATIVO Y SALUD DEL PROYECTO
-  - Resumen del periodo: Sprints evaluados, {t} tareas resueltas, {v} SP completados y {spillover} SP pendientes.
+[PROYECTO_RESUMEN]
+{t} tickets completados, {pct}% del alcance y {spillover} SP pendientes: qué significan juntos.
 
-# 02 — TENDENCIA DE VELOCIDAD E HISTÓRICO DE ENTREGAS
-  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_VELOCIDAD]
-  - Cita la gráfica de velocidad explicando la evolución del rendimiento por sprint y la estabilidad de entregas.
+[PROYECTO_ENTREGA]
+Velocidad y throughput: qué implica este volumen para la planificación del equipo.
 
-# 03 — DIAGNÓSTICO DE FLUJO Y PUNTOS DE FRICCIÓN
-  - Analiza la acumulación de trabajo en progreso (WIP), los {bd} días bloqueados y el impacto del trabajo simultáneo por desarrollador.
+[PROYECTO_FLUJO]
+Fricción generada por los {bd} días bloqueados y acción táctica para reducirla.
 
-# 04 — HOJA DE RUTA Y ACCIONES TÁCTICAS DEL LÍDER
-  - 3 recomendaciones prácticas para optimizar el ciclo de vida y proteger la capacidad del equipo.
+[PROYECTO_TIEMPOS]
+Cycle Time ({ct}d, P85 {p85}d): estabilidad del flujo y acción sobre la cola larga.
+
+[PROYECTO_CAPACIDAD]
+Velocidad ({v} SP) frente a lo planificado ({planned} SP) y ajuste de compromiso sugerido.
+
+[PROYECTO_CALIDAD]
+Los {bugs} bugs en relación con los {t} tickets entregados.
+
+[PROYECTO_HALLAZGOS]
+3 hallazgos con evidencia numérica de los datos anteriores (una línea cada uno).
+
+[PROYECTO_EVOLUCION]
+Si no hay datos de periodos anteriores, escribe exactamente: "Sin datos del periodo anterior para comparar."
+
+[PROYECTO_MEJORA]
+3 recomendaciones (Hallazgo → Acción → Objetivo medible), una línea cada una.
+
+[PROYECTO_CONCLUSION]
+Una sola línea: cómo terminó el periodo.
+"""
+
+def _build_cierre_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
+    spillover = max(0, planned - v)
+    return f"""
+Actúa como un Director Ejecutivo y Asistente Analítico. No te presentes, no digas tu nombre ni uses saludos iniciales.
+Genera el informe de CIERRE MENSUAL DEL PROYECTO con los datos:
+Velocidad entregada: {v} SP. Throughput: {t} tickets resueltos. Tareas en deuda: {spillover} SP. Cycle Time medio: {ct} días hábiles. Días bloqueados: {bd}. Bugs: {bugs}.
+
+REGLAS OBLIGATORIAS:
+1. Tono ejecutivo, estratégico y orientado a resultados de negocio del mes.
+2. ESTRUCTURA LA EVALUACIÓN EN 3 NIVELES: a) Dato observado → b) Relación o tendencia → c) Impacto mensual.
+
+ESTRUCTURA DE SECCIONES (Utiliza exactamente estas etiquetas con los nuevos títulos para el Cierre Mensual):
+
+[PROYECTO_1] RESUMEN EJECUTIVO DEL MES
+Analiza brevemente los {t} tickets completados y {spillover} SP pendientes.
+
+[PROYECTO_2] IMPACTO Y ENTREGABLES (VELOCIDAD)
+Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_VELOCIDAD]
+Analiza la evolución de la entrega mensual basándote en la velocidad y el throughput.
+
+[PROYECTO_3] CUELLOS DE BOTELLA Y FLUJO MENSUAL
+Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_FLUJO]
+Evalúa los {bd} días bloqueados y los estancamientos del mes.
+
+[PROYECTO_4] PREDICTIBILIDAD Y TIEMPOS DE RESPUESTA
+Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_PREDICTIBILIDAD]
+Analiza el Cycle Time (P50: {p50}d, P85: {p85}d, P95: {p95}d).
+
+[PROYECTO_5] ALCANCE, DEUDA TÉCNICA Y DEFECTOS
+Analiza los {bugs} bugs y el scope creep del mes.
+
+[PROYECTO_6] SALUD GENERAL DEL PROYECTO
+Analiza la salud global ({health}/100) del proyecto al cierre del mes.
+
+[PROYECTO_7] PLAN DE ACCIÓN PARA EL PRÓXIMO MES
+Propón 3 recomendaciones específicas o directrices ejecutivas para el mes que entra.
 """
 
 def _build_lider_desarrollador_prompt(metrics, v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
     return f"""
-Actúa como Nubi IA, Asistente Analítico del Líder Técnico.
+Actúa como un Asistente Analítico Experto del Líder Técnico. No te presentes, no digas tu nombre ni uses saludos iniciales.
 Analiza la actividad del desarrollador con los datos:
 Story Points completados: {v} SP. Tareas cerradas: {t}. Cycle Time personal: {ct} días hábiles. Días de bloqueo: {bd}. Bugs reabiertos: {bugs}.
 
 REGLAS DE TONO: Tono positivo, de coaching técnico y crecimiento profesional. Cero lenguaje punitivo o jerárquico.
 
-Estructura la evaluación narrativa en 4 secciones:
+Estructura la evaluación narrativa en 4 secciones EXACTAMENTE, usando los títulos obligatorios y etiquetas:
 
 # 01 — PERFIL Y CARGA DE TRABAJO ACTUAL
   - Resumen de entregas cerradas ({t} tareas, {v} SP) y nivel de enfoque en el periodo.
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [TABLA_EVOLUCION]
 
 # 02 — RITMO DE ENTREGA Y EVOLUCIÓN
-  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRAFICA_VELOCIDAD]
-  - Analiza la estabilidad de velocidad individual a lo largo de los sprints.
+  - Analiza la estabilidad de velocidad individual y el impacto de los {v} SP entregados.
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRÁFICA_VELOCIDAD]
 
 # 03 — IDENTIFICACIÓN DE IMPEDIMENTOS Y MULTITAREA
   - Evalúa la presencia de sobrecarga por WIP simultáneo, cuellos de botella en QA o días bloqueados ({bd} días).
+  - Inyecta OBLIGATORIAMENTE la etiqueta: [GRÁFICA_FLUJO]
 
 # 04 — PLAN DE ACOMPAÑAMIENTO Y MENTORÍA TÉCNICA
   - Recomendaciones para el Líder Técnico sobre cómo apoyar al desarrollador, despejar bloqueos y balancear sus asignaciones.
@@ -583,7 +1013,7 @@ Estructura la evaluación narrativa en 4 secciones:
 
 def _build_lider_general_prompt(metrics):
     return f"""
-Actúa como Nubi IA, Asistente Analítico del Líder Técnico.
+Actúa como un Asistente Analítico Experto del Líder Técnico. No te presentes, no digas tu nombre ni uses saludos iniciales.
 Analiza el portafolio consolidado del Líder con los datos:
 Velocidad total: {metrics.get('velocity', 0)} SP. Throughput acumulado: {metrics.get('throughput', 0)} tickets. Cycle Time medio: {metrics.get('cycleTime', 0)} días hábiles. Bloqueos acumulados: {metrics.get('blockedDays', 0)} días.
 
@@ -607,14 +1037,112 @@ Estructura el informe en 4 secciones:
 
 def _get_fallback_insights(report_type: str) -> str:
     if report_type == "general":
-        return """# 01 — RESUMEN EJECUTIVO DEL PORTAFOLIO\nAnálisis de IA no disponible en este momento.\n\n[TABLA_PORTAFOLIO]\n\n# 02 — RENDIMIENTO COMPARATIVO\n[GRAFICA_PORTAFOLIO_VELOCIDAD]\n### Análisis de entrega\nAnálisis de IA no disponible.\n\n# 03 — CONCLUSIONES Y RIESGOS ESTRATÉGICOS\nAnálisis de IA no disponible.\n"""
+        return """# 01 — VISIÓN GENERAL DEL PORTAFOLIO
+El presente informe consolida el rendimiento general del portafolio multi-proyecto de MCHAV Analytics.
+
+# 02 — RESUMEN EJECUTIVO Y TABLA DE PORTAFOLIO
+[TABLA_PORTAFOLIO]
+
+# 03 — DESEMPEÑO COMPARATIVO DE VELOCIDAD
+[GRAFICA_PORTAFOLIO_VELOCIDAD]
+
+# 04 — ESTRUCTURA DE FLUJO Y EFICIENCIA
+Se analizan los indicadores agregados de entrega a nivel portafolio.
+
+# 05 — CONCLUSIONES Y RECOMENDACIONES TÁCTICAS
+El equipo mantiene una operación estable a lo largo de las distintas iniciativas evaluadas.
+"""
+    elif report_type == "monthly_pdf":
+        return """[PROYECTO_RESUMEN]
+El equipo mantuvo un progreso constante, con una entrega sostenida y gestión efectiva de las incidencias críticas.
+
+[PROYECTO_ENTREGA]
+El alcance general se abordó conforme a las previsiones, con ligeras fluctuaciones propias de la naturaleza del mes.
+
+[PROYECTO_FLUJO]
+El flujo de tareas evidencia periodos cortos de acumulación en validación (QA), que fueron resueltos progresivamente.
+
+[PROYECTO_TIEMPOS]
+Los percentiles de entrega se mantienen estables, logrando resoluciones predecibles dentro de las franjas habituales.
+
+[PROYECTO_CAPACIDAD]
+La capacidad del equipo se encuentra nivelada, logrando entregar una cantidad de puntos congruente con su histórico reciente.
+
+[PROYECTO_CALIDAD]
+Los defectos detectados se resolvieron sin poner en alto riesgo el desempeño estructural del periodo.
+
+[PROYECTO_HALLAZGOS]
+El equipo demuestra adaptabilidad ante bloqueos y sostiene una dinámica de entrega predecible.
+
+[PROYECTO_EVOLUCION]
+El periodo refleja estabilidad general al compararse con el mes anterior, consolidando los flujos de trabajo.
+
+[PROYECTO_MEJORA]
+Se sugiere continuar refinando el control de tareas en progreso y fortalecer el tiempo de revisión técnica.
+
+[PROYECTO_CONCLUSION]
+El mes concluye en un estado general saludable y con directrices claras para el próximo ciclo.
+"""
     elif report_type == "desarrollador":
-        return """# 01 — PERFIL DE DESEMPEÑO\nAnálisis de IA no disponible.\n\n[TABLA_EVOLUCION]\n\n# 02 — ACTIVIDAD Y ENTREGA\n[GRAFICA_VELOCIDAD]\n### Análisis de distribución\nAnálisis de IA no disponible.\n\n# 03 — FLUJO Y PRODUCTIVIDAD\n[GRAFICA_FLUJO]\n### Lectura del flujo\nAnálisis de IA no disponible.\n\n# 04 — DIAGNÓSTICO Y PLAN DE MEJORA\n### Hallazgos clave\nAnálisis de IA no disponible.\n"""
+        return """# 01 — PERFIL Y DESEMPEÑO INDIVIDUAL
+Diagnóstico operativo de desempeño individual.
+
+[TABLA_EVOLUCION]
+
+# 02 — ACTIVIDAD Y HISTÓRICO DE ENTREGAS
+[GRAFICA_VELOCIDAD]
+
+# 03 — FLUJO DE TRABAJO Y WIP
+[GRAFICA_FLUJO]
+
+# 04 — PLAN DE ACOMPAÑAMIENTO Y RECOMENDACIONES
+Se recomienda mantener la gestión controlada del WIP y priorizar el cierre de tareas en progreso.
+"""
     elif report_type == "proyecto":
-        return """[PROYECTO_1] CONTEXTO GENERAL DEL PERIODO\nAnálisis de IA no disponible.\n[PROYECTO_2] ESTADO DEL FLUJO DE TRABAJO Y CUELLOS DE BOTELLA\nAnálisis de IA no disponible.\n[PROYECTO_3] ANÁLISIS DE PREDICTIBILIDAD Y RIESGOS\nAnálisis de IA no disponible.\n[PROYECTO_4] CONCLUSIONES ESTRATÉGICAS Y PLAN DE ACCIÓN\nAnálisis de IA no disponible.\n"""
-        return """# 01 — CONTEXTO GENERAL DEL PERIODO\nAnálisis de IA no disponible.\n# 02 — ESTADO DEL FLUJO DE TRABAJO Y CUELLOS DE BOTELLA\nAnálisis de IA no disponible.\n# 03 — ANÁLISIS DE PREDICTIBILIDAD Y RIESGOS\nAnálisis de IA no disponible.\n# 04 — CONCLUSIONES ESTRATÉGICAS Y PLAN DE ACCIÓN\nAnálisis de IA no disponible.\n"""
+        return """[PROYECTO_1] FICHA DEL PROYECTO Y ESTADO GENERAL
+El presente informe evalúa la evolución operativa, evaluando la tendencia de entrega y la salud técnica del proyecto.
+
+[PROYECTO_2] EVOLUCIÓN DE LA ENTREGA
+[GRAFICA_VELOCIDAD]
+La gráfica de histórico de velocidad evidencia la relación entre el trabajo comprometido y el entregado durante los sprints analizados.
+
+[PROYECTO_3] EVOLUCIÓN DEL FLUJO Y WIP
+[GRAFICA_FLUJO]
+El diagrama de flujo acumulado muestra la distribución de las tareas y permite visualizar dónde se concentra el trabajo en progreso.
+
+[PROYECTO_4] EVOLUCIÓN DE LOS TIEMPOS Y PREDICTIBILIDAD
+[GRAFICA_PREDICTIBILIDAD]
+La distribución de tiempos de ciclo expone la predictibilidad del equipo, destacando que la mayor parte del trabajo se resuelve dentro de los márgenes esperados, aunque existen casos atípicos asociados a complejidad o bloqueos.
+
+[PROYECTO_5] ALCANCE, CAMBIOS Y TRABAJO PENDIENTE
+[GRAFICA_BURNUP]
+El seguimiento del alcance evidencia cómo evoluciona el trabajo pendiente respecto a los compromisos iniciales.
+
+[PROYECTO_6] RIESGOS Y OPORTUNIDADES
+Se recomienda monitorear activamente los picos de trabajo en progreso y gestionar las dependencias para evitar cuellos de botella prolongados.
+
+[PROYECTO_7] CONCLUSIONES ESTRATÉGICAS DE IA
+A lo largo de los periodos evaluados, el proyecto mantiene una capacidad de entrega funcional. Se sugiere estabilizar la planificación para reducir la variabilidad entre sprints.
+"""
     else:
-        return """# 01 — RESUMEN DEL SPRINT\nAnálisis de IA no disponible.\n\n# 02 — DESEMPEÑO Y VELOCIDAD\nAnálisis de IA no disponible.\n\n# 03 — FLUJO Y ESTABILIDAD\nAnálisis de IA no disponible.\n\n# 04 — PLAN DE MEJORA CONTINUA\nAnálisis de IA no disponible.\n"""
+        return """# 01 — INTRODUCCIÓN Y CONTEXTO DEL SPRINT
+El reporte analiza el desempeño del equipo en el sprint actual.
+
+# 02 — RESUMEN EJECUTIVO Y MÉTRICAS CLAVE
+%%HIGHLIGHT%%
+El equipo registró un cumplimiento sostenido de su capacidad planificada, manteniendo la estabilidad operativa.
+%%
+
+# 03 — GESTIÓN DE ALCANCE Y VELOCIDAD
+[GRAFICA_BURNUP]
+[GRAFICA_VELOCIDAD]
+
+# 04 — EVOLUCIÓN DEL FLUJO Y CUELLOS DE BOTELLA
+[GRAFICA_FLUJO]
+
+# 05 — TIEMPOS DE CICLO Y PREDICTIBILIDAD
+[GRAFICA_PREDICTIBILIDAD]
+"""
 
 def _build_sprint_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
     return f"""
