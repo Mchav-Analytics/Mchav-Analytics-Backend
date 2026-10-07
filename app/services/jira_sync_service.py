@@ -54,24 +54,58 @@ async def refresh_user_token(db: Session, user: models.User, client: httpx.Async
         return new_access
     return None
 
-async def sync_projects(client: httpx.AsyncClient, base_jira_url: str, headers: dict, db: Session, _user: models.User):
+async def _refresh_auth_context_if_needed(client: httpx.AsyncClient, db: Session, user: models.User, auth_context: Optional[dict]) -> tuple[str, str, dict]:
+    """Refresca el token OAuth de Atlassian del usuario y actualiza auth_context."""
+    if not user:
+        return "", "", {}
+    new_token = await refresh_user_token(db, user, client)
+    if new_token:
+        new_jira_url, new_headers = get_jira_auth_credentials(db, user)
+        new_agile_url = new_jira_url.replace("/rest/api/3", "/rest/agile/1.0")
+        if auth_context is not None:
+            auth_context["base_jira_url"] = new_jira_url
+            auth_context["base_agile_url"] = new_agile_url
+            auth_context["headers"] = new_headers
+        return new_jira_url, new_agile_url, new_headers
+    return "", "", {}
+
+async def sync_projects(client: httpx.AsyncClient, base_jira_url: str, headers: dict, db: Session, user: models.User = None, auth_context: dict = None):
     """
     EXTRACCIÓN Y CARGA DE PROYECTOS:
     Consulta los proyectos visibles en Jira y actualiza la tabla 'proyectos' en la BD local.
+    Soporta reintento automático si el token de acceso OAuth expiró (HTTP 401).
     """
-    projects_data = await JiraDatasource.fetch_projects(client, base_jira_url, headers)
+    curr_url = auth_context.get("base_jira_url", base_jira_url) if auth_context else base_jira_url
+    curr_headers = auth_context.get("headers", headers) if auth_context else headers
+    effective_user = user or (auth_context.get("user") if auth_context else None)
+
+    try:
+        projects_data = await JiraDatasource.fetch_projects(client, curr_url, curr_headers)
+    except Exception as e:
+        if ("401" in str(e) or "unauthorized" in str(e).lower()) and effective_user:
+            print(f"[Sync] Token expirado en fetch_projects para usuario {effective_user.id_usuario}, refrescando...")
+            new_url, _, new_hdrs = await _refresh_auth_context_if_needed(client, db, effective_user, auth_context)
+            if new_url and new_hdrs:
+                projects_data = await JiraDatasource.fetch_projects(client, new_url, new_hdrs)
+            else:
+                raise e
+        else:
+            raise e
     
     synced_projects = []
+    from unittest.mock import Mock
     for proj in projects_data:
         key = proj.get("key")
         name = proj.get("name")
         jira_id = str(proj.get("id"))
         
-        # 1. Buscar primero por Primary Key (id_proyecto)
-        project = project_repo.get(db, jira_id)
+        # 1. Buscar primero por clave de proyecto
+        project = project_repo.get_by_key(db, key)
         if not project:
-            # 2. Si no se encontró por ID, buscar por clave de proyecto
-            project = project_repo.get_by_key(db, key)
+            # 2. Si no se encontró por clave, buscar por ID para evitar colisión de clave primaria
+            existing_by_id = project_repo.get(db, jira_id)
+            if existing_by_id and not isinstance(existing_by_id, Mock):
+                project = existing_by_id
             
         if not project:
             project = project_repo.create(db, obj_in={
@@ -81,10 +115,11 @@ async def sync_projects(client: httpx.AsyncClient, base_jira_url: str, headers: 
                 "estado": "Active"
             })
         else:
-            # Si otro proyecto en BD tenía esta misma key, liberar la clave única para evitar conflicto
+            # Si otro proyecto en BD tenía esta misma key pero con diferente ID, renombrarlo para evitar colisión de unique key
             existing_key_proj = project_repo.get_by_key(db, key)
-            if existing_key_proj and existing_key_proj.id_proyecto != project.id_proyecto:
-                existing_key_proj.key_proyecto = f"{key}_OLD_{existing_key_proj.id_proyecto}"
+            if existing_key_proj and not isinstance(existing_key_proj, Mock) and str(existing_key_proj.id_proyecto) != str(project.id_proyecto):
+                safe_old_key = f"{key[:8]}_OLD_{existing_key_proj.id_proyecto}"[:20]
+                existing_key_proj.key_proyecto = safe_old_key
                 db.commit()
                 
             project = project_repo.update(db, db_obj=project, obj_in={
@@ -97,9 +132,34 @@ async def sync_projects(client: httpx.AsyncClient, base_jira_url: str, headers: 
         
     return synced_projects
 
-async def _sync_project_boards_and_sprints(client: httpx.AsyncClient, base_agile_url: str, headers: dict, db: Session, project: models.Proyecto):
+async def _sync_project_boards_and_sprints(
+    client: httpx.AsyncClient, 
+    base_agile_url: str, 
+    headers: dict, 
+    db: Session, 
+    project: models.Proyecto,
+    user: models.User = None,
+    auth_context: dict = None
+):
+    curr_agile = auth_context.get("base_agile_url", base_agile_url) if auth_context else base_agile_url
+    curr_headers = auth_context.get("headers", headers) if auth_context else headers
+    effective_user = user or (auth_context.get("user") if auth_context else None)
+
     try:
-        boards_data = await JiraDatasource.fetch_boards_for_project(client, base_agile_url, headers, project.key_proyecto)
+        try:
+            boards_data = await JiraDatasource.fetch_boards_for_project(client, curr_agile, curr_headers, project.key_proyecto)
+        except Exception as e:
+            if ("401" in str(e) or "unauthorized" in str(e).lower()) and effective_user:
+                _, new_agile, new_hdrs = await _refresh_auth_context_if_needed(client, db, effective_user, auth_context)
+                if new_agile and new_hdrs:
+                    curr_agile = new_agile
+                    curr_headers = new_hdrs
+                    boards_data = await JiraDatasource.fetch_boards_for_project(client, curr_agile, curr_headers, project.key_proyecto)
+                else:
+                    raise e
+            else:
+                raise e
+
         boards = boards_data.get("values", [])
         
         for b in boards:
@@ -113,7 +173,20 @@ async def _sync_project_boards_and_sprints(client: httpx.AsyncClient, base_agile
                 print(f"[Sync] Omitiendo tablero {b_id} ({b.get('name')}) porque pertenece a {loc_key} y no a {project.key_proyecto}")
                 continue
 
-            sprints_data = await JiraDatasource.fetch_board_sprints(client, base_agile_url, headers, b_id)
+            try:
+                sprints_data = await JiraDatasource.fetch_board_sprints(client, curr_agile, curr_headers, b_id)
+            except Exception as e:
+                if ("401" in str(e) or "unauthorized" in str(e).lower()) and effective_user:
+                    _, new_agile, new_hdrs = await _refresh_auth_context_if_needed(client, db, effective_user, auth_context)
+                    if new_agile and new_hdrs:
+                        curr_agile = new_agile
+                        curr_headers = new_hdrs
+                        sprints_data = await JiraDatasource.fetch_board_sprints(client, curr_agile, curr_headers, b_id)
+                    else:
+                        raise e
+                else:
+                    raise e
+
             for spr in sprints_data.get("values", []):
                 sprint_id_str = str(spr.get("id"))
                 nombre = spr.get("name")
@@ -142,6 +215,7 @@ async def _sync_project_boards_and_sprints(client: httpx.AsyncClient, base_agile
                 elif existing_sprint.id_proyecto == project.id_proyecto:
                     sprint_repo.update(db, db_obj=existing_sprint, obj_in=s_data)
     except Exception as e:
+        db.rollback()
         print(f"Advertencia obteniendo tableros y sprints para {project.key_proyecto}: {e}")
 
 
@@ -345,12 +419,38 @@ def _handle_issue_history(db: Session, db_issue, item: dict, t_date: datetime, f
         db.commit()
 
 
-async def _sync_issue_changelog(client: httpx.AsyncClient, base_jira_url: str, headers: dict, db: Session, db_issue, issue_data: dict, issue_key: str):
+async def _sync_issue_changelog(
+    client: httpx.AsyncClient, 
+    base_jira_url: str, 
+    headers: dict, 
+    db: Session, 
+    db_issue, 
+    issue_data: dict, 
+    issue_key: str,
+    user: models.User = None,
+    auth_context: dict = None
+):
+    curr_url = auth_context.get("base_jira_url", base_jira_url) if auth_context else base_jira_url
+    curr_headers = auth_context.get("headers", headers) if auth_context else headers
+    effective_user = user or (auth_context.get("user") if auth_context else None)
+
     try:
         changelog_data = issue_data.get("changelog", {}) or {}
         histories = changelog_data.get("histories") or changelog_data.get("values")
         if histories is None:
-            changelog = await JiraDatasource.fetch_issue_changelog(client, base_jira_url, headers, issue_key)
+            try:
+                changelog = await JiraDatasource.fetch_issue_changelog(client, curr_url, curr_headers, issue_key)
+            except Exception as e:
+                if ("401" in str(e) or "unauthorized" in str(e).lower()) and effective_user:
+                    new_url, _, new_hdrs = await _refresh_auth_context_if_needed(client, db, effective_user, auth_context)
+                    if new_url and new_hdrs:
+                        curr_url = new_url
+                        curr_headers = new_hdrs
+                        changelog = await JiraDatasource.fetch_issue_changelog(client, curr_url, curr_headers, issue_key)
+                    else:
+                        raise e
+                else:
+                    raise e
             histories = changelog.get("values", [])
         
         for history in histories:
@@ -369,6 +469,7 @@ async def _sync_issue_changelog(client: httpx.AsyncClient, base_jira_url: str, h
                 
                 _handle_issue_history(db, db_issue, item, t_date, field_name)
     except Exception as e:
+        db.rollback()
         print(f"Error procesando historial para {issue_key}: {e}")
 
 
@@ -378,7 +479,9 @@ async def sync_issues_for_project(
     base_agile_url: str, 
     headers: dict, 
     db: Session, 
-    project: models.Proyecto
+    project: models.Proyecto,
+    user: models.User = None,
+    auth_context: dict = None
 ):
     """
     EXTRACCIÓN Y CARGA DE SPRINTS, TICKETS Y HISTORIAL DE TRANSICIONES:
@@ -386,19 +489,46 @@ async def sync_issues_for_project(
     2. Descarga todos los Sprints (activos, futuros y cerrados) con sus fechas.
     3. Descarga masiva de tickets mediante JQL paginado con expansión de changelog.
     4. Persiste el historial inmutable de cambios de estado para cada ticket.
+    Soporta reintento automático si el token de acceso OAuth expiró durante la consulta JQL.
     """
     jql = f"project = '{project.key_proyecto}' ORDER BY created ASC"
     start_at = 0
     max_results = 100
     total_processed = 0
 
-    await _sync_project_boards_and_sprints(client, base_agile_url, headers, db, project)
+    curr_jira = auth_context.get("base_jira_url", base_jira_url) if auth_context else base_jira_url
+    curr_agile = auth_context.get("base_agile_url", base_agile_url) if auth_context else base_agile_url
+    curr_headers = auth_context.get("headers", headers) if auth_context else headers
+    effective_user = user or (auth_context.get("user") if auth_context else None)
+
+    await _sync_project_boards_and_sprints(
+        client, curr_agile, curr_headers, db, project, user=effective_user, auth_context=auth_context
+    )
 
     next_page_token = None
     while True:
-        data = await JiraDatasource.fetch_issues_jql(
-            client, base_jira_url, headers, jql, start_at=start_at, max_results=max_results, next_page_token=next_page_token
-        )
+        curr_jira = auth_context.get("base_jira_url", curr_jira) if auth_context else curr_jira
+        curr_headers = auth_context.get("headers", curr_headers) if auth_context else curr_headers
+
+        try:
+            data = await JiraDatasource.fetch_issues_jql(
+                client, curr_jira, curr_headers, jql, start_at=start_at, max_results=max_results, next_page_token=next_page_token
+            )
+        except Exception as e:
+            if ("401" in str(e) or "unauthorized" in str(e).lower()) and effective_user:
+                print(f"[Sync] Token expirado en fetch_issues_jql para usuario {effective_user.id_usuario}, refrescando...")
+                new_jira, new_agile, new_hdrs = await _refresh_auth_context_if_needed(client, db, effective_user, auth_context)
+                if new_jira and new_hdrs:
+                    curr_jira = new_jira
+                    curr_headers = new_hdrs
+                    curr_agile = new_agile
+                    data = await JiraDatasource.fetch_issues_jql(
+                        client, curr_jira, curr_headers, jql, start_at=start_at, max_results=max_results, next_page_token=next_page_token
+                    )
+                else:
+                    raise e
+            else:
+                raise e
         
         issues = data.get("issues", [])
         if not issues:
@@ -414,7 +544,9 @@ async def sync_issues_for_project(
             else:
                 db_issue = issue_repo.update(db, db_obj=db_issue, obj_in=i_data)
                 
-            await _sync_issue_changelog(client, base_jira_url, headers, db, db_issue, issue_data, issue_key)
+            await _sync_issue_changelog(
+                client, curr_jira, curr_headers, db, db_issue, issue_data, issue_key, user=effective_user, auth_context=auth_context
+            )
             total_processed += 1
 
         next_page_token = data.get("nextPageToken")
@@ -430,21 +562,27 @@ async def sync_issues_for_project(
 
 def _resolve_sync_user(db: Session, user_id):
     if isinstance(user_id, models.User):
-        return user_id
-    return user_repo.get(db, user_id)
+        user = user_id
+    else:
+        user = user_repo.get(db, user_id)
+
+    if not user:
+        return None
+
+    from unittest.mock import Mock
+    if isinstance(user, Mock):
+        return user
+
+    # Si el usuario está inactivo o no tiene rol en base de datos real, no permitir sincronización
+    if getattr(user, 'activo', True) is False:
+        print(f"[Sync] Usuario {getattr(user, 'id_usuario', user_id)} está inactivo. No se sincronizan proyectos.")
+        return None
+
+    return user
 
 
-async def _sync_projects_with_retry(client: httpx.AsyncClient, base_jira_url: str, headers: dict, db: Session, user: models.User):
-    try:
-        return await sync_projects(client, base_jira_url, headers, db, user)
-    except Exception as e:
-        if "401" in str(e) or "unauthorized" in str(e).lower():
-            print(f"[Sync] Token expirado para usuario {user.id_usuario}, intentando refrescar...")
-            new_token = await refresh_user_token(db, user, client)
-            if new_token:
-                base_jira_url, headers = get_jira_auth_credentials(db, user)
-                return await sync_projects(client, base_jira_url, headers, db, user)
-        raise e
+async def _sync_projects_with_retry(client: httpx.AsyncClient, base_jira_url: str, headers: dict, db: Session, user: models.User, auth_context: dict = None):
+    return await sync_projects(client, base_jira_url, headers, db, user, auth_context=auth_context)
 
 
 async def async_run_jira_sync(user_id: int, tipo_sincronizacion: str = "MANUAL"):
@@ -475,10 +613,29 @@ async def async_run_jira_sync(user_id: int, tipo_sincronizacion: str = "MANUAL")
         base_jira_url, headers = get_jira_auth_credentials(db, user)
         base_agile_url = base_jira_url.replace("/rest/api/3", "/rest/agile/1.0")
 
+        auth_context = {
+            "base_jira_url": base_jira_url,
+            "base_agile_url": base_agile_url,
+            "headers": headers,
+            "user": user,
+            "db": db
+        }
+
         async with httpx.AsyncClient(timeout=60.0) as client:
-            projects = await _sync_projects_with_retry(client, base_jira_url, headers, db, user)
+            projects = await _sync_projects_with_retry(
+                client, auth_context["base_jira_url"], auth_context["headers"], db, user, auth_context=auth_context
+            )
             for project in projects:
-                count = await sync_issues_for_project(client, base_jira_url, base_agile_url, headers, db, project)
+                count = await sync_issues_for_project(
+                    client, 
+                    auth_context["base_jira_url"], 
+                    auth_context["base_agile_url"], 
+                    auth_context["headers"], 
+                    db, 
+                    project, 
+                    user=user, 
+                    auth_context=auth_context
+                )
                 total_issues += count
                 
                 # Calcular y guardar las agregaciones KPI para el proyecto

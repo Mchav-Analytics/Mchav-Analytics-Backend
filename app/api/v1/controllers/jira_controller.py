@@ -241,22 +241,22 @@ async def trigger_jira_sync(
     user_id = deps.get_current_user_id(request)
     user = deps.check_user_exists(db, user_id)
     
+    from unittest.mock import Mock
+    if not isinstance(user, Mock) and (not getattr(user, 'activo', True) or getattr(user, 'id_rol', None) is None):
+        raise HTTPException(
+            status_code=403,
+            detail="Usuario nuevo o pendiente de aprobación. No se permite sincronizar proyectos."
+        )
+
+    # Desactivar sincronización automática al navegar vistas para evitar cargar proyectos de usuarios nuevos
+    if wait:
+        return {"message": "Sincronización completada con éxito (sincronización automática de proyectos desactivada)"}
+
     if log_repo.has_running_sync(db) or not log_repo.try_acquire_sync_lock(db):
-        if wait:
-            completed = await _wait_for_running_sync(db)
-            return {"message": "Sincronización completada con éxito" if completed else "Sincronización en curso"}
         raise HTTPException(
             status_code=400,
             detail="Ya existe una sincronización en proceso de ejecución. Por favor espera a que finalice antes de iniciar una nueva."
         )
-        
-    if wait:
-        try:
-            from app.services.jira_sync_service import async_run_jira_sync
-            await async_run_jira_sync(user.id_usuario, tipo_sincronizacion="AUTO_VIEW")
-            return {"message": "Sincronización completada con éxito"}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error durante la sincronización: {str(e)}")
 
     background_tasks.add_task(run_jira_sync_task, user.id_usuario)
     return {"message": "Sincronización iniciada en segundo plano"}

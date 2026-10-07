@@ -100,7 +100,16 @@ async def exchange_code_for_user_profile(code: str) -> dict:
         if not resources:
             raise HTTPException(status_code=400, detail="El usuario no tiene acceso a ningún sitio de Jira")
 
-        cloud_id = resources[0]["id"] # Tomar el primer cloudId disponible
+        target_domain = (os.getenv("JIRA_DOMAIN", "")).lower().replace("https://", "").replace("http://", "").strip("/")
+        selected_resource = None
+        if target_domain:
+            for r in resources:
+                if target_domain in r.get("url", "").lower():
+                    selected_resource = r
+                    break
+        if not selected_resource:
+            selected_resource = resources[0]
+        cloud_id = selected_resource["id"]
 
         # Obtener el perfil del usuario autenticado (/myself)
         profile = await _fetch_user_profile_with_fallback(client, cloud_id, headers)
