@@ -59,8 +59,9 @@ async def get_projects(
     user_id = deps.get_current_user_id(request)
     user = deps.check_user_exists(db, user_id)
     
-    rol_nombre = user.rol.nombre_rol.lower() if user.rol else ""
-    if rol_nombre == "administrador":
+    rol_nombre = user.rol.nombre_rol.lower().strip() if user.rol and user.rol.nombre_rol else ""
+    is_management = any(r in rol_nombre for r in ["administrador", "admin", "planificador", "líder", "lider", "manager"])
+    if is_management:
         projects = project_repo.get_multi(db, skip=offset, limit=limit, sort=sort, order=order)
     else:
         assigned_proj_ids = [p.id_proyecto for p in user.proyectos_asignados]

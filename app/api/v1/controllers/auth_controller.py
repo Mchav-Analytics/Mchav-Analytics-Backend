@@ -24,7 +24,7 @@ router = APIRouter()
     description="Devuelve la información detallada del perfil, roles y estados de vinculación de Jira del usuario autenticado en la sesión actual o mediante un Bearer Token."
 )
 async def get_current_user_info(
-    current_user: User = Security(get_current_user, scopes=["jira:read"])
+    current_user: User = Security(get_current_user, scopes=[])
 ):
     rol_nombre = current_user.rol.nombre_rol if current_user.rol else None
     

@@ -191,6 +191,8 @@ async def update_user_role(
         raise HTTPException(status_code=400, detail="El rol especificado no existe.")
 
     target_user.id_rol = role.id_rol
+    if not target_user.activo and role.nombre_rol != "Usuario":
+        target_user.activo = True
     db.commit()
     db.refresh(target_user)
 
