@@ -67,16 +67,30 @@ async def sync_projects(client: httpx.AsyncClient, base_jira_url: str, headers: 
         name = proj.get("name")
         jira_id = str(proj.get("id"))
         
-        project = project_repo.get_by_key(db, key)
+        # 1. Buscar primero por Primary Key (id_proyecto)
+        project = project_repo.get(db, jira_id)
+        if not project:
+            # 2. Si no se encontró por ID, buscar por clave de proyecto
+            project = project_repo.get_by_key(db, key)
+            
         if not project:
             project = project_repo.create(db, obj_in={
                 "id_proyecto": jira_id,
                 "key_proyecto": key,
-                "nombre": name
+                "nombre": name,
+                "estado": "Active"
             })
         else:
+            # Si otro proyecto en BD tenía esta misma key, liberar la clave única para evitar conflicto
+            existing_key_proj = project_repo.get_by_key(db, key)
+            if existing_key_proj and existing_key_proj.id_proyecto != project.id_proyecto:
+                existing_key_proj.key_proyecto = f"{key}_OLD_{existing_key_proj.id_proyecto}"
+                db.commit()
+                
             project = project_repo.update(db, db_obj=project, obj_in={
-                "nombre": name
+                "key_proyecto": key,
+                "nombre": name,
+                "estado": "Active"
             })
             
         synced_projects.append(project)
@@ -487,15 +501,30 @@ async def async_run_jira_sync(user_id: int, tipo_sincronizacion: str = "MANUAL")
         print(f"[Sync Error] Falló la sincronización: {error_msg}\n{traceback_str}")
 
         if log_entry:
-            log_repo.update(db, db_obj=log_entry, obj_in={
-                "issues_procesados": total_issues,
-                "tiempo_ejecucion_segundos": duration,
-                "resultado": "ERROR",
-                "detalle_error": f"{error_msg}\n{traceback_str[:300]}"
-            })
+            try:
+                log_repo.update(db, db_obj=log_entry, obj_in={
+                    "issues_procesados": total_issues,
+                    "tiempo_ejecucion_segundos": duration,
+                    "resultado": "ERROR",
+                    "detalle_error": f"{error_msg}\n{traceback_str[:300]}"
+                })
+            except Exception as update_err:
+                print(f"[Sync Error] No se pudo actualizar log_entry: {update_err}")
+                db.rollback()
     finally:
-        log_repo.release_sync_lock(db)
-        db.close()
+        try:
+            log_repo.release_sync_lock(db)
+        except Exception:
+            try:
+                fallback_db = SessionLocal()
+                log_repo.release_sync_lock(fallback_db)
+                fallback_db.close()
+            except Exception:
+                pass
+        try:
+            db.close()
+        except Exception:
+            pass
 
 def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
     """

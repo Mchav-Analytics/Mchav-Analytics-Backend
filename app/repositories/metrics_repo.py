@@ -36,15 +36,28 @@ class CRUDLog(CRUDBase[LogsSincronizacion]):
     def try_acquire_sync_lock(self, db: Session, task_name: str = "JIRA_SYNC") -> bool:
         """Intenta adquirir el candado exclusivo insertando en SyncLock. Retorna True si lo logró."""
         from sqlalchemy.exc import IntegrityError
-        from app.models.metrics import SyncLock
+        from app.models.metrics import SyncLock, LogsSincronizacion
         try:
             db.add(SyncLock(task_name=task_name))
             db.commit()
             print(f"Lock adquirido exitosamente: {task_name}")
             return True
-        except IntegrityError as e:
+        except IntegrityError:
             db.rollback()
-            print(f"Error integridad al adquirir candado: {e}")
+            # Si el lock ya existía, verificar si está huérfano (no hay ejecución RUNNING)
+            running_log = db.query(LogsSincronizacion).filter(
+                LogsSincronizacion.resultado == "RUNNING"
+            ).order_by(LogsSincronizacion.fecha_ejecucion.desc()).first()
+            if not running_log:
+                print(f"Lock huérfano detectado para {task_name}. Liberando y reintentando...")
+                self.release_sync_lock(db, task_name)
+                try:
+                    db.add(SyncLock(task_name=task_name))
+                    db.commit()
+                    print(f"Lock readquirido exitosamente tras limpiar huérfano: {task_name}")
+                    return True
+                except Exception:
+                    db.rollback()
             return False
         except Exception as e:
             db.rollback()
@@ -58,11 +71,19 @@ class CRUDLog(CRUDBase[LogsSincronizacion]):
         db.commit()
 
     def has_running_sync(self, db: Session) -> bool:
-        """HU-007 CA-03: Retorna True si ya existe una sincronización en proceso.
-        (Mantenido por retrocompatibilidad visual si se necesita en UI)"""
-        from app.models.metrics import SyncLock
+        """HU-007 CA-03: Retorna True si ya existe una sincronización en proceso."""
+        from app.models.metrics import SyncLock, LogsSincronizacion
         count = db.query(SyncLock).filter(SyncLock.task_name == "JIRA_SYNC").count()
-        return count > 0
+        if count == 0:
+            return False
+        # Si existe el lock pero en los logs no hay ninguna sincronización RUNNING, es un lock huérfano
+        running_log = db.query(LogsSincronizacion).filter(
+            LogsSincronizacion.resultado == "RUNNING"
+        ).order_by(LogsSincronizacion.fecha_ejecucion.desc()).first()
+        if not running_log:
+            self.release_sync_lock(db, "JIRA_SYNC")
+            return False
+        return True
 
     def get_filtered_logs(
         self, 
