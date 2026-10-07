@@ -15,6 +15,12 @@ class JiraTransientError(Exception):
     """Excepción para errores efímeros de red o rate-limiting (429, 502, 503, 504) que deben ser reintentados."""
     pass
 
+class JiraIntegrationError(RuntimeError):
+    """Excepción específica para errores de comunicación o autenticación con la API de Jira."""
+    pass
+
+CONTENT_TYPE_JSON = "application/json"
+
 # Decorador de reintentos exponenciales para las operaciones HTTP contra Jira Cloud
 jira_retry_decorator = retry(
     retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError, JiraTransientError)),
@@ -29,6 +35,14 @@ class JiraDatasource:
     Soporta autenticación mediante OAuth 2.0 (3LO) o API Token directo.
     """
 
+    def __init__(self, base_url: str = None, headers: Dict[str, str] = None):
+        self.base_url = base_url
+        self.headers = headers or {}
+
+    async def search_issues(self, jql: str, max_results: int = 50):
+        async with httpx.AsyncClient() as client:
+            return await self.fetch_issues_jql(client, self.base_url, self.headers, jql, max_results=max_results)
+
     @staticmethod
     @jira_retry_decorator
     async def fetch_projects(client: httpx.AsyncClient, base_url: str, headers: Dict[str, str]) -> Any:
@@ -37,7 +51,7 @@ class JiraDatasource:
         if res.status_code in (429, 502, 503, 504):
             raise JiraTransientError(f"Error efímero de Jira ({res.status_code}): {res.text}")
         if res.status_code != 200:
-            raise Exception(f"Error al obtener proyectos de Jira: {res.text}")
+            raise JiraIntegrationError(f"Error al obtener proyectos de Jira: {res.text}")
         return res.json()
 
     @staticmethod
@@ -85,7 +99,7 @@ class JiraDatasource:
         if res_legacy.status_code == 200:
             return res_legacy.json()
 
-        raise Exception(f"Error al buscar issues con JQL '{jql}': Falló POST ({res_post.text}) y GET Legacy ({res_legacy.text if 'res_legacy' in locals() else 'N/A'})")
+        raise JiraIntegrationError(f"Error al buscar issues con JQL '{jql}': Falló POST ({res_post.text}) y GET Legacy ({res_legacy.text if 'res_legacy' in locals() else 'N/A'})")
 
     @staticmethod
     @jira_retry_decorator
@@ -153,11 +167,11 @@ class JiraDatasource:
             base_url = f"{domain}/rest/api/3"
             headers = {
                 "Authorization": f"Basic {encoded_creds}",
-                "Accept": "application/json",
-                "Content-Type": "application/json"
+                "Accept": CONTENT_TYPE_JSON,
+                "Content-Type": CONTENT_TYPE_JSON
             }
             return base_url, headers
-        raise Exception("No hay credenciales de Jira configuradas en el sistema.")
+        raise JiraIntegrationError("No hay credenciales de Jira configuradas en el sistema.")
 
     @staticmethod
     def get_auth_credentials(db: Session, user: models.User) -> tuple[str, dict]:
@@ -174,15 +188,15 @@ class JiraDatasource:
                 base_url = f"https://api.atlassian.com/ex/jira/{user.cloud_id}/rest/api/3"
                 headers = {
                     "Authorization": f"Bearer {user.access_token}",
-                    "Accept": "application/json",
-                    "Content-Type": "application/json"
+                    "Accept": CONTENT_TYPE_JSON,
+                    "Content-Type": CONTENT_TYPE_JSON
                 }
                 return base_url, headers
 
         try:
             return JiraDatasource.get_system_credentials()
         except Exception:
-            raise Exception("No hay credenciales de Jira configuradas en el entorno ni en la sesión.")
+            raise JiraIntegrationError("No hay credenciales de Jira configuradas en el entorno ni en la sesión.")
 
     @staticmethod
     @jira_retry_decorator
@@ -206,7 +220,7 @@ class JiraDatasource:
         if res.status_code in (429, 502, 503, 504):
             raise JiraTransientError(f"Error efímero al obtener transiciones de Jira ({res.status_code})")
         if res.status_code != 200:
-            raise Exception(f"Error al obtener transiciones para '{issue_id_or_key}' de Jira (HTTP {res.status_code}): {res.text}")
+            raise JiraIntegrationError(f"Error al obtener transiciones para '{issue_id_or_key}' de Jira (HTTP {res.status_code}): {res.text}")
         return res.json()
 
     @staticmethod
@@ -234,7 +248,7 @@ class JiraDatasource:
                 if res_sys.status_code in (200, 204):
                     return {"status": "success", "status_code": res_sys.status_code}
                 elif res_sys.status_code not in (429, 502, 503, 504):
-                    raise Exception(f"Jira rechazó la transición (HTTP {res_sys.status_code}): {res_sys.text}")
+                    raise JiraIntegrationError(f"Jira rechazó la transición (HTTP {res_sys.status_code}): {res_sys.text}")
             except Exception as e:
                 if not isinstance(e, JiraTransientError):
                     raise e
@@ -242,7 +256,7 @@ class JiraDatasource:
         if res.status_code in (429, 502, 503, 504):
             raise JiraTransientError(f"Error efímero al ejecutar transición en Jira ({res.status_code})")
         if res.status_code not in (200, 204):
-            raise Exception(f"Jira rechazó la transición (HTTP {res.status_code}): {res.text}")
+            raise JiraIntegrationError(f"Jira rechazó la transición (HTTP {res.status_code}): {res.text}")
         return {"status": "success", "status_code": res.status_code}
     
     execute_issue_transition = post_issue_transition
@@ -267,7 +281,7 @@ class JiraDatasource:
                 if res_sys.status_code in (200, 204):
                     return {"status": "success", "status_code": res_sys.status_code}
                 elif res_sys.status_code not in (429, 502, 503, 504):
-                    raise Exception(f"Jira rechazó la reasignación (HTTP {res_sys.status_code}): {res_sys.text}")
+                    raise JiraIntegrationError(f"Jira rechazó la reasignación (HTTP {res_sys.status_code}): {res_sys.text}")
             except Exception as e:
                 if not isinstance(e, JiraTransientError):
                     raise e
@@ -275,7 +289,7 @@ class JiraDatasource:
         if res.status_code in (429, 502, 503, 504):
             raise JiraTransientError(f"Error efímero al reasignar ticket en Jira ({res.status_code})")
         if res.status_code not in (200, 204):
-            raise Exception(f"Jira rechazó la reasignación (HTTP {res.status_code}): {res.text}")
+            raise JiraIntegrationError(f"Jira rechazó la reasignación (HTTP {res.status_code}): {res.text}")
         return {"status": "success", "status_code": res.status_code}
 
     @staticmethod
@@ -331,7 +345,7 @@ class JiraDatasource:
         if res.status_code in (429, 502, 503, 504):
             raise JiraTransientError(f"Error efímero al consultar issue en Jira ({res.status_code})")
         if res.status_code != 200:
-            raise Exception(f"Error al consultar issue '{issue_id_or_key}' en Jira (HTTP {res.status_code}): {res.text}")
+            raise JiraIntegrationError(f"Error al consultar issue '{issue_id_or_key}' en Jira (HTTP {res.status_code}): {res.text}")
         return res.json()
 
 

@@ -18,6 +18,7 @@ from app.repositories import project_repo, kpi_repo, sprint_repo, issue_repo
 from app.services.sprint_health_service import calculate_sprint_health, get_issue_cycle_time_days
 from app.services.jira_normalizer import is_done, is_bug, DONE_STATUSES, BLOCKED_STATUSES
 
+LEGEND_LOC = 'upper center'
 
 def sanitize_text(text: str) -> str:
     """Sanitiza cadenas de texto para compatibilidad de codificación FPDF Latin-1."""
@@ -118,7 +119,7 @@ def _generate_burnup_chart_img(burnup_data: list) -> str:
     lines2, labels2 = ax2.get_legend_handles_labels()
     # Reorder legend to match the screenshot: Alcance Total, Trabajo Completado, Ritmo Ideal, Tareas Terminadas
     order = [0, 2, 1, 3] if len(lines1 + lines2) == 4 else range(len(lines1 + lines2))
-    ax.legend([lines1[0], lines1[2], lines1[1], lines2[0]], [labels1[0], labels1[2], labels1[1], labels2[0]], fontsize=7, frameon=False, loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=4)
+    ax.legend([lines1[0], lines1[2], lines1[1], lines2[0]], [labels1[0], labels1[2], labels1[1], labels2[0]], fontsize=7, frameon=False, loc=LEGEND_LOC, bbox_to_anchor=(0.5, 1.15), ncol=4)
     
     plt.tight_layout()
     tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
@@ -157,7 +158,7 @@ def _generate_cfd_chart_img(cfd_data: list) -> str:
     ax.grid(axis='y', linestyle='--', alpha=0.4, zorder=0)
     
     handles, labels = ax.get_legend_handles_labels()
-    ax.legend(handles[::-1], labels[::-1], fontsize=7, frameon=False, loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=4)
+    ax.legend(handles[::-1], labels[::-1], fontsize=7, frameon=False, loc=LEGEND_LOC, bbox_to_anchor=(0.5, 1.15), ncol=4)
     
     plt.tight_layout()
     tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
@@ -210,7 +211,7 @@ def _generate_velocity_chart_img(velocity_data: list) -> str:
     handles, labels = ax.get_legend_handles_labels()
     handles.append(avg_line)
     labels.append(avg_line.get_label())
-    ax.legend(handles, labels, fontsize=7, frameon=False, loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=3)
+    ax.legend(handles, labels, fontsize=7, frameon=False, loc=LEGEND_LOC, bbox_to_anchor=(0.5, 1.15), ncol=3)
 
     plt.tight_layout()
     tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
@@ -225,9 +226,15 @@ def _generate_scatter_chart_img(scatter_points: list, p50: float, p85: float, p9
     ax.set_facecolor('white')
     
     xs = [p.get('x', i+1) for i, p in enumerate(scatter_points)]
-    ys = [p.get('y', 0) for p in scatter_points]
-    
-    colors = ['#10b981' if y <= p50 else '#f59e0b' if y <= p85 else '#f43f5e' for y in ys]
+    ys = [p.get('y', 0.0) for p in scatter_points]
+    def _get_scatter_color(y_val):
+        if y_val <= p50:
+            return '#10b981'
+        if y_val <= p85:
+            return '#f59e0b'
+        return '#f43f5e'
+
+    colors = [_get_scatter_color(y) for y in ys]
     
     ax.scatter(xs, ys, c=colors, s=35, alpha=0.9, zorder=3)
     
@@ -242,7 +249,7 @@ def _generate_scatter_chart_img(scatter_points: list, p50: float, p85: float, p9
     ax.spines['left'].set_visible(False)
     ax.spines['bottom'].set_color('#e2e8f0')
     ax.grid(axis='y', linestyle='--', alpha=0.4, zorder=0)
-    ax.legend(fontsize=7, frameon=False, loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=3)
+    ax.legend(fontsize=7, frameon=False, loc=LEGEND_LOC, bbox_to_anchor=(0.5, 1.15), ncol=3)
     
     plt.tight_layout()
     tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
@@ -325,15 +332,7 @@ def _extract_section(text, section_tag):
         return clean_text
     return "Análisis no disponible para esta sección."
 
-def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nombre: str = "Administrador", is_leader: bool = False) -> bytes:
-    """
-    Genera físicamente el archivo PDF oficial estructurado multitemporalmente (14 Secciones).
-    """
-    # 1. Obtener Datos Reales de la BD
-    proyecto = project_repo.get(db, id=proyecto_id) if (db and proyecto_id != "ALL") else None
-    raw_nombre = proyecto.nombre if proyecto else ("Portafolio General" if proyecto_id == "ALL" else proyecto_id)
-    proyecto_nombre = raw_nombre.replace("ANACITYCS", "ANALYTICS").replace("anacitycs", "analytics").replace("Anacitycs", "Analytics")
-
+def _compute_report_core_metrics(db: Session, proyecto_id: str, proyecto_nombre: str, is_leader: bool):
     health_info = calculate_sprint_health(db, proyecto_id=proyecto_id) if db else {}
     health_score = health_info.get("health_score", 85)
 
@@ -367,7 +366,6 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nom
     pct_completion = int((velocity / total_scope) * 100) if total_scope else 0
     spillover = max(0, planned - velocity)
 
-    # Variables for previous period (mocked for now, as DB history might be complex)
     prev_velocity = max(velocity * 0.85, 10)
     prev_throughput = max(throughput * 0.88, 5)
     prev_cycle_time = p50 * 1.12
@@ -394,35 +392,42 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nom
         print("Error Gemini:", e)
         ai_full_text = ""
 
-    t_resumen = _extract_section(ai_full_text, "PROYECTO_RESUMEN")
-    t_entrega = _extract_section(ai_full_text, "PROYECTO_ENTREGA")
-    t_flujo = _extract_section(ai_full_text, "PROYECTO_FLUJO")
-    t_tiempos = _extract_section(ai_full_text, "PROYECTO_TIEMPOS")
-    t_capacidad = _extract_section(ai_full_text, "PROYECTO_CAPACIDAD")
-    t_calidad = _extract_section(ai_full_text, "PROYECTO_CALIDAD")
-    t_hallazgos = _extract_section(ai_full_text, "PROYECTO_HALLAZGOS")
-    t_evolucion = _extract_section(ai_full_text, "PROYECTO_EVOLUCION")
-    t_mejora = _extract_section(ai_full_text, "PROYECTO_MEJORA")
-    t_conclusion = _extract_section(ai_full_text, "PROYECTO_CONCLUSION")
+    ai_sections = {
+        "resumen": _extract_section(ai_full_text, "PROYECTO_RESUMEN"),
+        "entrega": _extract_section(ai_full_text, "PROYECTO_ENTREGA"),
+        "flujo": _extract_section(ai_full_text, "PROYECTO_FLUJO"),
+        "tiempos": _extract_section(ai_full_text, "PROYECTO_TIEMPOS"),
+        "capacidad": _extract_section(ai_full_text, "PROYECTO_CAPACIDAD"),
+        "calidad": _extract_section(ai_full_text, "PROYECTO_CALIDAD"),
+        "hallazgos": _extract_section(ai_full_text, "PROYECTO_HALLAZGOS"),
+        "evolucion": _extract_section(ai_full_text, "PROYECTO_EVOLUCION"),
+        "mejora": _extract_section(ai_full_text, "PROYECTO_MEJORA"),
+        "conclusion": _extract_section(ai_full_text, "PROYECTO_CONCLUSION")
+    }
 
-    burnup_data = [{'fecha_real': 'S-2', 'alcance_total': total_scope, 'trabajo_completado': 0, 'ritmo_ideal': 0}, {'fecha_real': 'S-1', 'alcance_total': total_scope, 'trabajo_completado': int(velocity*0.5), 'ritmo_ideal': int(total_scope*0.5)}, {'fecha_real': 'Actual', 'alcance_total': total_scope, 'trabajo_completado': int(velocity), 'ritmo_ideal': total_scope}]
-    cfd_data = [{'fecha_real': 'S-2', 'por_hacer': throughput, 'en_progreso': 0, 'en_revision': 0, 'completado': 0}, {'fecha_real': 'S-1', 'por_hacer': int(throughput*0.3), 'en_progreso': int(throughput*0.3), 'en_revision': int(throughput*0.1), 'completado': int(throughput*0.3)}, {'fecha_real': 'Actual', 'por_hacer': 0, 'en_progreso': 0, 'en_revision': 0, 'completado': throughput}]
-    velocity_data = [{'sprint': 'S-2', 'comprometido': max(int(velocity*0.9),20), 'completado': max(int(velocity*0.8),15)}, {'sprint': 'S-1', 'comprometido': total_scope, 'completado': int(velocity*0.95)}, {'sprint': 'Actual', 'comprometido': planned, 'completado': int(velocity)}]
-    scatter_points = [{'x': 1, 'y': p50*0.5}, {'x': 2, 'y': p50*0.8}, {'x': 3, 'y': p50*1.0}, {'x': 4, 'y': p50*1.2}, {'x': 5, 'y': p85*0.9}, {'x': 6, 'y': p85*1.0}, {'x': 7, 'y': p95*0.95}]
+    return {
+        "health_score": health_score,
+        "total_issues": total_issues,
+        "velocity": velocity,
+        "throughput": throughput,
+        "avg_cycle_time": avg_cycle_time,
+        "blocked_days": blocked_days,
+        "bugs_count": bugs_count,
+        "p50": p50,
+        "p85": p85,
+        "p95": p95,
+        "total_scope": total_scope,
+        "planned": planned,
+        "pct_completion": pct_completion,
+        "spillover": spillover,
+        "prev_velocity": prev_velocity,
+        "prev_throughput": prev_throughput,
+        "prev_cycle_time": prev_cycle_time,
+        "ai_sections": ai_sections
+    }
 
-    burnup_img = _generate_burnup_chart_img(burnup_data)
-    cfd_img = _generate_cfd_chart_img(cfd_data)
-    velocity_img = _generate_velocity_chart_img(velocity_data)
-    scatter_img = _generate_scatter_chart_img(scatter_points, p50, p85, p95)
 
-    pdf = ExecutivePDFReport(proyecto_nombre=proyecto_nombre, report_type_title="REPORTE MENSUAL")
-
-    SPANISH_MONTHS = {1: "enero", 2: "febrero", 3: "marzo", 4: "abril", 5: "mayo", 6: "junio", 7: "julio", 8: "agosto", 9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"}
-    now = datetime.now()
-    mes_str = f"{SPANISH_MONTHS[now.month].capitalize()} de {now.year}"
-    fecha_emision = f"{now.day} de {SPANISH_MONTHS[now.month]} de {now.year}"
-
-    # PAGE 1: PORTADA
+def _render_cover_page(pdf, proyecto_nombre, usuario_nombre, mes_str, fecha_emision):
     pdf.add_page()
     tl_swoosh, br_swoosh = _ensure_swoosh_assets()
     if os.path.exists(tl_swoosh): pdf.image(tl_swoosh, x=0, y=0, w=150)
@@ -434,7 +439,7 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nom
 
     pdf.set_xy(16, 115)
     pdf.set_font('Helvetica', 'B', 32)
-    pdf.set_text_color(15, 23, 42) # Dark blue/slate
+    pdf.set_text_color(15, 23, 42)
     pdf.cell(178, 12, sanitize_text("REPORTE MENSUAL"), 0, 1, 'C')
     
     pdf.set_xy(16, 128)
@@ -466,7 +471,8 @@ def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nom
     pdf.set_text_color(156, 163, 175)
     pdf.cell(50, 4, sanitize_text("CONFIDENCIAL · USO INTERNO"), 0, 1, 'L')
 
-    # PAGE 2: INDICE Y METODOLOGIA
+
+def _render_index_and_intro(pdf, mes_str):
     pdf.add_page()
     pdf.draw_header_footer(2)
     
@@ -507,6 +513,8 @@ Métricas utilizadas: Velocity, Throughput, Cycle Time y flujos CFD.
 Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festivos para reflejar capacidad real operativa."""
     pdf.multi_cell(178, 6, sanitize_text(met_text))
 
+
+def _render_summary_and_flow_pages(pdf, m, charts):
     # PAGE 3: RESUMEN Y EVOLUCION ENTREGA
     pdf.add_page()
     pdf.draw_header_footer(3)
@@ -517,43 +525,38 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.cell(178, 8, sanitize_text("5. Resumen del mes — ¿Qué pasó?"), 0, 1, 'L')
     pdf.line(16, 28, 194, 28)
     
-    # KPI Table Without Borders
     pdf.set_xy(16, 32)
     pdf.set_font('Helvetica', 'B', 9)
     pdf.set_text_color(15, 23, 42)
     pdf.cell(80, 6, "Indicador", 0, 0, 'L')
     pdf.cell(40, 6, "Resultado", 0, 0, 'C')
     pdf.cell(40, 6, "Variacion", 0, 1, 'C')
-    
-    # Separator Line
     pdf.line(16, 38, 176, 38)
     
     pdf.set_font('Helvetica', '', 9)
     pdf.set_text_color(51, 65, 85)
     def_row = lambda ind, res, var: (pdf.set_x(16), pdf.cell(80, 6, sanitize_text(ind), 0), pdf.cell(40, 6, str(res), 0, 0, 'C'), pdf.cell(40, 6, sanitize_text(var), 0, 1, 'C'))
-    def_row("Tickets gestionados", total_issues, "+ 12%")
-    def_row("Tickets completados", throughput, "+ 8%")
-    def_row("Tickets pendientes", total_issues - throughput, "- 5%")
-    def_row("Story Points completados", int(velocity), "+ 10%")
-    
-    # Bottom Separator
+    def_row("Tickets gestionados", m["total_issues"], "+ 12%")
+    def_row("Tickets completados", m["throughput"], "+ 8%")
+    def_row("Tickets pendientes", m["total_issues"] - m["throughput"], "- 5%")
+    def_row("Story Points completados", int(m["velocity"]), "+ 10%")
     pdf.line(16, pdf.get_y(), 176, pdf.get_y())
     
     pdf.set_xy(16, 62)
     pdf.set_font('Helvetica', 'B', 10)
     pdf.cell(178, 6, sanitize_text("Lectura del periodo"), 0, 1, 'L')
     pdf.set_font('Times', '', 11)
-    pdf.multi_cell(178, 6, sanitize_text(t_resumen))
+    pdf.multi_cell(178, 6, sanitize_text(m["ai_sections"]["resumen"]))
 
     pdf.set_xy(16, 120)
     pdf.set_font('Helvetica', 'B', 14)
     pdf.set_text_color(15, 23, 42)
     pdf.cell(178, 8, sanitize_text("6. Evolución de la entrega"), 0, 1, 'L')
     pdf.line(16, 128, 194, 128)
-    pdf.image(burnup_img, x=20, y=132, w=160)
+    pdf.image(charts["burnup_img"], x=20, y=132, w=160)
     pdf.set_xy(16, 215)
     pdf.set_font('Times', '', 11)
-    pdf.multi_cell(178, 6, sanitize_text(t_entrega))
+    pdf.multi_cell(178, 6, sanitize_text(m["ai_sections"]["entrega"]))
 
     # PAGE 4: FLUJO Y TIEMPOS
     pdf.add_page()
@@ -564,21 +567,23 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.set_text_color(15, 23, 42)
     pdf.cell(178, 8, sanitize_text("7. Estado del flujo de trabajo"), 0, 1, 'L')
     pdf.line(16, 28, 194, 28)
-    pdf.image(cfd_img, x=20, y=32, w=160)
+    pdf.image(charts["cfd_img"], x=20, y=32, w=160)
     pdf.set_xy(16, 115)
     pdf.set_font('Times', '', 11)
-    pdf.multi_cell(178, 6, sanitize_text(t_flujo))
+    pdf.multi_cell(178, 6, sanitize_text(m["ai_sections"]["flujo"]))
 
     pdf.set_xy(16, 150)
     pdf.set_font('Helvetica', 'B', 14)
     pdf.set_text_color(15, 23, 42)
     pdf.cell(178, 8, sanitize_text("8. Tiempos y predictibilidad"), 0, 1, 'L')
     pdf.line(16, 158, 194, 158)
-    pdf.image(scatter_img, x=20, y=162, w=160)
+    pdf.image(charts["scatter_img"], x=20, y=162, w=160)
     pdf.set_xy(16, 245)
     pdf.set_font('Times', '', 11)
-    pdf.multi_cell(178, 6, sanitize_text(t_tiempos))
+    pdf.multi_cell(178, 6, sanitize_text(m["ai_sections"]["tiempos"]))
 
+
+def _render_quality_and_conclusion_pages(pdf, m, charts):
     # PAGE 5: CAPACIDAD Y CALIDAD
     pdf.add_page()
     pdf.draw_header_footer(5)
@@ -588,10 +593,10 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.set_text_color(15, 23, 42)
     pdf.cell(178, 8, sanitize_text("9. Velocidad y capacidad"), 0, 1, 'L')
     pdf.line(16, 28, 194, 28)
-    pdf.image(velocity_img, x=20, y=32, w=160)
+    pdf.image(charts["velocity_img"], x=20, y=32, w=160)
     pdf.set_xy(16, 115)
     pdf.set_font('Times', '', 11)
-    pdf.multi_cell(178, 6, sanitize_text(t_capacidad))
+    pdf.multi_cell(178, 6, sanitize_text(m["ai_sections"]["capacidad"]))
 
     pdf.set_xy(16, 160)
     pdf.set_font('Helvetica', 'B', 14)
@@ -599,35 +604,30 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.cell(178, 8, sanitize_text("10. Calidad y trabajo pendiente"), 0, 1, 'L')
     pdf.line(16, 168, 194, 168)
     
-    # Agregar tabla de calidad
     pdf.set_xy(16, 172)
     pdf.set_font('Helvetica', 'B', 9)
     pdf.set_text_color(15, 23, 42)
     pdf.cell(90, 6, "Indicador de Calidad", 0, 0, 'L')
     pdf.cell(40, 6, "Total", 0, 0, 'C')
     pdf.cell(48, 6, "Estado", 0, 1, 'R')
-    
     pdf.line(16, 178, 194, 178)
     
     pdf.set_font('Helvetica', '', 9)
     pdf.set_text_color(51, 65, 85)
     pdf.set_xy(16, 180)
     pdf.cell(90, 6, "Defectos (Bugs) Reportados", 0, 0, 'L')
-    pdf.cell(40, 6, str(bugs_count), 0, 0, 'C')
-    estado_bugs = "Normal" if bugs_count < 5 else "Atencion"
-    pdf.cell(48, 6, estado_bugs, 0, 1, 'R')
+    pdf.cell(40, 6, str(m["bugs_count"]), 0, 0, 'C')
+    pdf.cell(48, 6, "Normal" if m["bugs_count"] < 5 else "Atencion", 0, 1, 'R')
     
     pdf.set_xy(16, 186)
     pdf.cell(90, 6, "Dias Bloqueados", 0, 0, 'L')
-    pdf.cell(40, 6, str(blocked_days), 0, 0, 'C')
-    estado_bloqueos = "Normal" if blocked_days < 10 else "Critico"
-    pdf.cell(48, 6, estado_bloqueos, 0, 1, 'R')
-    
+    pdf.cell(40, 6, str(m["blocked_days"]), 0, 0, 'C')
+    pdf.cell(48, 6, "Normal" if m["blocked_days"] < 10 else "Critico", 0, 1, 'R')
     pdf.line(16, 192, 194, 192)
     
     pdf.set_xy(16, 198)
     pdf.set_font('Helvetica', '', 10)
-    pdf.multi_cell(178, 5, sanitize_text(t_calidad))
+    pdf.multi_cell(178, 5, sanitize_text(m["ai_sections"]["calidad"]))
 
     # PAGE 6: HALLAZGOS Y EVOLUCION
     pdf.add_page()
@@ -639,7 +639,6 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.cell(178, 8, sanitize_text("11. Hallazgos principales"), 0, 1, 'L')
     pdf.line(16, 28, 194, 28)
     
-    # Agregar tabla de hallazgos
     pdf.set_xy(16, 32)
     pdf.set_font('Helvetica', 'B', 9)
     pdf.set_text_color(15, 23, 42)
@@ -651,15 +650,15 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.set_text_color(51, 65, 85)
     pdf.set_xy(16, 40)
     pdf.cell(89, 6, "Salud Global del Sprint (Sprint Health)", 0, 0, 'L')
-    pdf.cell(89, 6, f"{health_score} / 100", 0, 1, 'R')
+    pdf.cell(89, 6, f"{m['health_score']} / 100", 0, 1, 'R')
     pdf.set_xy(16, 46)
     pdf.cell(89, 6, "Predictibilidad P85", 0, 0, 'L')
-    pdf.cell(89, 6, f"{p85} dias", 0, 1, 'R')
+    pdf.cell(89, 6, f"{m['p85']} dias", 0, 1, 'R')
     pdf.line(16, 52, 194, 52)
     
     pdf.set_xy(16, 58)
     pdf.set_font('Times', '', 11)
-    pdf.multi_cell(178, 6, sanitize_text(t_hallazgos))
+    pdf.multi_cell(178, 6, sanitize_text(m["ai_sections"]["hallazgos"]))
 
     pdf.set_xy(16, 130)
     pdf.set_font('Helvetica', 'B', 14)
@@ -674,21 +673,19 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.cell(30, 6, "Mes anterior", 0, 0, 'C')
     pdf.cell(30, 6, "Mes actual", 0, 0, 'C')
     pdf.cell(30, 6, "Variacion", 0, 1, 'C')
-    
     pdf.line(16, 148, 176, 148)
     
     pdf.set_font('Helvetica', '', 9)
     pdf.set_text_color(51, 65, 85)
     def_row2 = lambda ind, m1, m2, var: (pdf.set_x(16), pdf.cell(70, 6, sanitize_text(ind), 0), pdf.cell(30, 6, str(m1), 0, 0, 'C'), pdf.cell(30, 6, str(m2), 0, 0, 'C'), pdf.cell(30, 6, sanitize_text(var), 0, 1, 'C'))
-    def_row2("Tickets completados", int(prev_throughput), int(throughput), "+ 14%")
-    def_row2("Velocity promedio", int(prev_velocity), int(velocity), "+ 17%")
-    def_row2("Cycle Time", f"{prev_cycle_time:.1f} d", f"{p50:.1f} d", "- 12%")
-    
+    def_row2("Tickets completados", int(m["prev_throughput"]), int(m["throughput"]), "+ 14%")
+    def_row2("Velocity promedio", int(m["prev_velocity"]), int(m["velocity"]), "+ 17%")
+    def_row2("Cycle Time", f"{m['prev_cycle_time']:.1f} d", f"{m['p50']:.1f} d", "- 12%")
     pdf.line(16, pdf.get_y(), 176, pdf.get_y())
 
     pdf.set_xy(16, 172)
     pdf.set_font('Times', '', 11)
-    pdf.multi_cell(178, 6, sanitize_text(t_evolucion))
+    pdf.multi_cell(178, 6, sanitize_text(m["ai_sections"]["evolucion"]))
 
     # PAGE 7: MEJORA Y CONCLUSION
     pdf.add_page()
@@ -701,7 +698,7 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.line(16, 28, 194, 28)
     pdf.set_xy(16, 32)
     pdf.set_font('Times', '', 11)
-    pdf.multi_cell(178, 6, sanitize_text(t_mejora))
+    pdf.multi_cell(178, 6, sanitize_text(m["ai_sections"]["mejora"]))
 
     pdf.set_xy(16, 150)
     pdf.set_font('Helvetica', 'B', 14)
@@ -710,9 +707,49 @@ Consideraciones: Los tiempos (Lead/Cycle Time) excluyen fines de semana y festiv
     pdf.line(16, 158, 194, 158)
     pdf.set_xy(16, 162)
     pdf.set_font('Times', '', 11)
-    pdf.multi_cell(178, 6, sanitize_text(t_conclusion))
+    pdf.multi_cell(178, 6, sanitize_text(m["ai_sections"]["conclusion"]))
 
-    for img_p in [burnup_img, cfd_img, velocity_img, scatter_img]:
+
+def generate_pdf_report_bytes(db: Session, proyecto_id: str = "ALL", usuario_nombre: str = "Administrador", is_leader: bool = False) -> bytes:
+    """
+    Genera físicamente el archivo PDF oficial estructurado multitemporalmente (14 Secciones).
+    """
+    proyecto = project_repo.get(db, id=proyecto_id) if (db and proyecto_id != "ALL") else None
+    if proyecto:
+        raw_nombre = proyecto.nombre
+    elif proyecto_id == "ALL":
+        raw_nombre = "Portafolio General"
+    else:
+        raw_nombre = proyecto_id
+    proyecto_nombre = raw_nombre.replace("ANACITYCS", "ANALYTICS").replace("anacitycs", "analytics").replace("Anacitycs", "Analytics")
+
+    m = _compute_report_core_metrics(db, proyecto_id, proyecto_nombre, is_leader)
+
+    burnup_data = [{'fecha_real': 'S-2', 'alcance_total': m["total_scope"], 'trabajo_completado': 0, 'ritmo_ideal': 0}, {'fecha_real': 'S-1', 'alcance_total': m["total_scope"], 'trabajo_completado': int(m["velocity"]*0.5), 'ritmo_ideal': int(m["total_scope"]*0.5)}, {'fecha_real': 'Actual', 'alcance_total': m["total_scope"], 'trabajo_completado': int(m["velocity"]), 'ritmo_ideal': m["total_scope"]}]
+    cfd_data = [{'fecha_real': 'S-2', 'por_hacer': m["throughput"], 'en_progreso': 0, 'en_revision': 0, 'completado': 0}, {'fecha_real': 'S-1', 'por_hacer': int(m["throughput"]*0.3), 'en_progreso': int(m["throughput"]*0.3), 'en_revision': int(m["throughput"]*0.1), 'completado': int(m["throughput"]*0.3)}, {'fecha_real': 'Actual', 'por_hacer': 0, 'en_progreso': 0, 'en_revision': 0, 'completado': m["throughput"]}]
+    velocity_data = [{'sprint': 'S-2', 'comprometido': max(int(m["velocity"]*0.9),20), 'completado': max(int(m["velocity"]*0.8),15)}, {'sprint': 'S-1', 'comprometido': m["total_scope"], 'completado': int(m["velocity"]*0.95)}, {'sprint': 'Actual', 'comprometido': m["planned"], 'completado': int(m["velocity"])}]
+    scatter_points = [{'x': 1, 'y': m["p50"]*0.5}, {'x': 2, 'y': m["p50"]*0.8}, {'x': 3, 'y': m["p50"]*1.0}, {'x': 4, 'y': m["p50"]*1.2}, {'x': 5, 'y': m["p85"]*0.9}, {'x': 6, 'y': m["p85"]*1.0}, {'x': 7, 'y': m["p95"]*0.95}]
+
+    charts = {
+        "burnup_img": _generate_burnup_chart_img(burnup_data),
+        "cfd_img": _generate_cfd_chart_img(cfd_data),
+        "velocity_img": _generate_velocity_chart_img(velocity_data),
+        "scatter_img": _generate_scatter_chart_img(scatter_points, m["p50"], m["p85"], m["p95"])
+    }
+
+    pdf = ExecutivePDFReport(proyecto_nombre=proyecto_nombre, report_type_title="REPORTE MENSUAL")
+
+    SPANISH_MONTHS = {1: "enero", 2: "febrero", 3: "marzo", 4: "abril", 5: "mayo", 6: "junio", 7: "julio", 8: "agosto", 9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"}
+    now = datetime.now()
+    mes_str = f"{SPANISH_MONTHS[now.month].capitalize()} de {now.year}"
+    fecha_emision = f"{now.day} de {SPANISH_MONTHS[now.month]} de {now.year}"
+
+    _render_cover_page(pdf, proyecto_nombre, usuario_nombre, mes_str, fecha_emision)
+    _render_index_and_intro(pdf, mes_str)
+    _render_summary_and_flow_pages(pdf, m, charts)
+    _render_quality_and_conclusion_pages(pdf, m, charts)
+
+    for img_p in charts.values():
         if img_p and os.path.exists(img_p):
             try: os.unlink(img_p)
             except: pass

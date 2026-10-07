@@ -6,6 +6,10 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
 
+FK_PROYECTOS_ID_PROYECTO = "proyectos.id_proyecto"
+FK_SPRINTS_ID_SPRINT = "sprints.id_sprint"
+ONDELETE_SET_NULL = "SET NULL"
+
 class KpisHistoricos(Base):
     """
     Modelo ORM que almacena las capturas históricas de KPIs calculados por proyecto y por sprint.
@@ -15,8 +19,8 @@ class KpisHistoricos(Base):
     __tablename__ = "kpis_historicos"
 
     id_kpi = Column(Integer, primary_key=True, autoincrement=True) # Clave primaria autonumerada
-    id_proyecto = Column(String(50), ForeignKey("proyectos.id_proyecto", ondelete="CASCADE"), nullable=False)
-    id_sprint = Column(String(50), ForeignKey("sprints.id_sprint", ondelete="SET NULL"), nullable=True) # None si son KPIs globales
+    id_proyecto = Column(String(50), ForeignKey(FK_PROYECTOS_ID_PROYECTO, ondelete="CASCADE"), nullable=False)
+    id_sprint = Column(String(50), ForeignKey(FK_SPRINTS_ID_SPRINT, ondelete=ONDELETE_SET_NULL), nullable=True) # None si son KPIs globales
     fecha_calculo = Column(DateTime(timezone=True), server_default=func.now()) # Estampa de tiempo del cálculo
     
     # Métricas calculadas
@@ -54,8 +58,8 @@ class KpisDesarrollador(Base):
     __tablename__ = "kpis_desarrolladores"
 
     id_kpi_dev = Column(Integer, primary_key=True, autoincrement=True)
-    id_proyecto = Column(String(50), ForeignKey("proyectos.id_proyecto", ondelete="CASCADE"), nullable=False)
-    id_sprint = Column(String(50), ForeignKey("sprints.id_sprint", ondelete="SET NULL"), nullable=True)
+    id_proyecto = Column(String(50), ForeignKey(FK_PROYECTOS_ID_PROYECTO, ondelete="CASCADE"), nullable=False)
+    id_sprint = Column(String(50), ForeignKey(FK_SPRINTS_ID_SPRINT, ondelete=ONDELETE_SET_NULL), nullable=True)
     assignee_id = Column(String(100), nullable=False, index=True)
     assignee_name = Column(String(150), nullable=False)
     assignee_email = Column(String(200), nullable=True, index=True)
@@ -80,8 +84,8 @@ class KpisSprintSalud(Base):
     __tablename__ = "kpis_sprint_salud"
 
     id_salud = Column(Integer, primary_key=True, autoincrement=True)
-    id_proyecto = Column(String(50), ForeignKey("proyectos.id_proyecto", ondelete="CASCADE"), nullable=False)
-    id_sprint = Column(String(50), ForeignKey("sprints.id_sprint", ondelete="SET NULL"), nullable=True)
+    id_proyecto = Column(String(50), ForeignKey(FK_PROYECTOS_ID_PROYECTO, ondelete="CASCADE"), nullable=False)
+    id_sprint = Column(String(50), ForeignKey(FK_SPRINTS_ID_SPRINT, ondelete=ONDELETE_SET_NULL), nullable=True)
     fecha_calculo = Column(DateTime(timezone=True), server_default=func.now())
 
     commitment_reliability_pct = Column(Numeric(5, 2), default=0.00)

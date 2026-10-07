@@ -36,6 +36,66 @@ def get_issue_active_days(issue: models.Issue) -> float:
 
     return 0.0
 
+def _check_block_48h_alert(issue, st, assignee, target_pid, db, current_alert_count: int) -> Optional[Dict[str, Any]]:
+    if not is_in_progress(st, db, target_pid):
+        return None
+    active_days = get_issue_active_days(issue)
+    if active_days <= 2.0:
+        return None
+    severity = "HIGH" if any(k in st for k in ("curs", "progres", "desarr", "doing", "active")) else "MEDIUM"
+    return {
+        "id_alerta": current_alert_count + 1,
+        "id_proyecto": target_pid,
+        "tipo_alerta": "BLOCK_48H",
+        "severidad": severity,
+        "key_issue": issue.key_issue,
+        "assignee_name": assignee,
+        "mensaje": f"La incidencia {issue.key_issue} ('{issue.summary}') lleva {active_days} días en estado '{issue.status_actual}' sin resolución.",
+        "recomendacion": f"Contactar a {assignee} para verificar si requiere apoyo técnico o desbloqueo de credenciales/dependencias.",
+        "atendida": False,
+        "fecha_creacion": datetime.now(timezone.utc).isoformat()
+    }
+
+
+def _check_ct_dev_alert(issue, assignee, target_pid, avg_project_ct: float, current_alert_count: int) -> Optional[Dict[str, Any]]:
+    if not issue.resolved_at:
+        return None
+    ct = get_issue_cycle_time_days(issue)
+    if ct > (avg_project_ct * 2) and ct > 3.0:
+        return {
+            "id_alerta": current_alert_count + 1,
+            "id_proyecto": target_pid,
+            "tipo_alerta": "CYCLE_TIME_DEV",
+            "severidad": "MEDIUM",
+            "key_issue": issue.key_issue,
+            "assignee_name": assignee,
+            "mensaje": f"El tiempo de ciclo de {issue.key_issue} ({round(ct, 1)}d) duplica el promedio histórico del proyecto ({round(avg_project_ct, 1)}d).",
+            "recomendacion": "Revisar si el ticket debe subdividirse en sub-tareas más pequeñas.",
+            "atendida": False,
+            "fecha_creacion": datetime.now(timezone.utc).isoformat()
+        }
+    return None
+
+
+def _check_excessive_wip_alerts(dev_wip: Dict[str, int], target_pid: str, current_alert_count: int) -> List[Dict[str, Any]]:
+    wip_alerts = []
+    for dev_name, count in dev_wip.items():
+        if count >= 3 and dev_name != "Desarrollador No Asignado":
+            wip_alerts.append({
+                "id_alerta": current_alert_count + len(wip_alerts) + 1,
+                "id_proyecto": target_pid,
+                "tipo_alerta": "WIP_EXCESSIVE",
+                "severidad": "HIGH",
+                "key_issue": None,
+                "assignee_name": dev_name,
+                "mensaje": f"El desarrollador {dev_name} tiene {count} tareas activas simultáneamente en progreso.",
+                "recomendacion": "Priorizar el cierre de tareas abiertas antes de iniciar un nuevo requerimiento.",
+                "atendida": False,
+                "fecha_creacion": datetime.now(timezone.utc).isoformat()
+            })
+    return wip_alerts
+
+
 def scan_and_generate_alerts(db: Optional[Session], proyecto_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Escanea la base de datos REAL para detectar:
@@ -56,72 +116,26 @@ def scan_and_generate_alerts(db: Optional[Session], proyecto_id: Optional[str] =
             query = query.filter(models.Issue.id_proyecto == target_pid)
         issues = query.all()
 
-        # Calcular cycle time promedio del proyecto para comparación
         resolved_cts = [get_issue_cycle_time_days(i) for i in issues if i.resolved_at and get_issue_cycle_time_days(i) > 0]
         avg_project_ct = (sum(resolved_cts) / len(resolved_cts)) if resolved_cts else 3.0
 
-        # 1. Detección de Bloqueos >48h y Cycle Time Deviation
         dev_wip = {}
         for issue in issues:
             st = (issue.status_actual or "").lower().strip()
             assignee = issue.assignee_name or "Desarrollador No Asignado"
 
-            # Si la tarea está activa en progreso / desarrollo / revisión
             if is_in_progress(st, db, target_pid):
                 dev_wip[assignee] = dev_wip.get(assignee, 0) + 1
-                active_days = get_issue_active_days(issue)
 
-                # Check >48h block (2.0 días)
-                if active_days > 2.0:
-                    severity = "HIGH" if any(k in st for k in ("curs", "progres", "desarr", "doing", "active")) else "MEDIUM"
-                    msg = f"La incidencia {issue.key_issue} ('{issue.summary}') lleva {active_days} días en estado '{issue.status_actual}' sin resolución."
-                    rec = f"Contactar a {assignee} para verificar si requiere apoyo técnico o desbloqueo de credenciales/dependencias."
+            block_alert = _check_block_48h_alert(issue, st, assignee, target_pid, db, len(alerts))
+            if block_alert:
+                alerts.append(block_alert)
 
-                    alerts.append({
-                        "id_alerta": len(alerts) + 1,
-                        "id_proyecto": target_pid,
-                        "tipo_alerta": "BLOCK_48H",
-                        "severidad": severity,
-                        "key_issue": issue.key_issue,
-                        "assignee_name": assignee,
-                        "mensaje": msg,
-                        "recomendacion": rec,
-                        "atendida": False,
-                        "fecha_creacion": datetime.now(timezone.utc).isoformat()
-                    })
+            ct_alert = _check_ct_dev_alert(issue, assignee, target_pid, avg_project_ct, len(alerts))
+            if ct_alert:
+                alerts.append(ct_alert)
 
-            # Check Cycle Time deviation para tickets resueltos
-            if issue.resolved_at:
-                ct = get_issue_cycle_time_days(issue)
-                if ct > (avg_project_ct * 2) and ct > 3.0:
-                    alerts.append({
-                        "id_alerta": len(alerts) + 1,
-                        "id_proyecto": target_pid,
-                        "tipo_alerta": "CYCLE_TIME_DEV",
-                        "severidad": "MEDIUM",
-                        "key_issue": issue.key_issue,
-                        "assignee_name": assignee,
-                        "mensaje": f"El tiempo de ciclo de {issue.key_issue} ({round(ct, 1)}d) duplica el promedio histórico del proyecto ({round(avg_project_ct, 1)}d).",
-                        "recomendacion": "Revisar si el ticket debe subdividirse en sub-tareas más pequeñas.",
-                        "atendida": False,
-                        "fecha_creacion": datetime.now(timezone.utc).isoformat()
-                    })
-
-        # 2. Detección de WIP Excesivo (>= 3 tareas simultáneas)
-        for dev_name, count in dev_wip.items():
-            if count >= 3 and dev_name != "Desarrollador No Asignado":
-                alerts.append({
-                    "id_alerta": len(alerts) + 1,
-                    "id_proyecto": target_pid,
-                    "tipo_alerta": "WIP_EXCESSIVE",
-                    "severidad": "HIGH",
-                    "key_issue": None,
-                    "assignee_name": dev_name,
-                    "mensaje": f"El desarrollador {dev_name} tiene {count} tareas activas simultáneamente en progreso.",
-                    "recomendacion": "Priorizar el cierre de tareas abiertas antes de iniciar un nuevo requerimiento.",
-                    "atendida": False,
-                    "fecha_creacion": datetime.now(timezone.utc).isoformat()
-                })
+        alerts.extend(_check_excessive_wip_alerts(dev_wip, target_pid, len(alerts)))
 
     except Exception as e:
         print("Error escaneando alertas en BD:", e)

@@ -46,40 +46,20 @@ class ReportInsightsRequest(BaseModel):
         extra = "allow"
 
 
-def _build_rich_project_context(db: Session, project_id: str, user_name: str) -> Dict[str, Any]:
-    """
-    Extrae un contexto analítico profundo y completo de la base de datos local:
-    - Salud del sprint y métricas de flujo
-    - Desempeño individual por desarrollador (SP, Cycle Time, WIP, Bugs, Tareas)
-    - Cuellos de botella e incidencias críticas
-    - Alertas operativas del sistema
-    """
+def _resolve_target_project_id(db: Session, project_id: str) -> str:
     target_project = project_id or "10000"
-    
-    # Si el frontend envía 'PROJ-01' o una clave corta, intentar resolver la clave a id_proyecto de BD
     try:
         proj_obj = db.query(models.Proyecto).filter(
             (models.Proyecto.id_proyecto == target_project) | (models.Proyecto.key_proyecto == target_project)
         ).first()
         if proj_obj:
-            target_project = proj_obj.id_proyecto
+            return proj_obj.id_proyecto
     except Exception:
         pass
+    return target_project
 
-    # 1. Salud de Sprint
-    sprint_health_data = {}
-    try:
-        sprint_health_data = calculate_sprint_health(db, target_project)
-    except Exception as e:
-        print("Aviso: No se pudo calcular sprint health para el chat de IA:", e)
 
-    # 2. Obtener todas las incidencias del proyecto
-    issues_query = db.query(models.Issue)
-    if target_project and target_project != "ALL":
-        issues_query = issues_query.filter(models.Issue.id_proyecto == target_project)
-    all_issues = issues_query.all()
-
-    # 3. Agrupar desempeño por desarrollador individual
+def _aggregate_dev_performance(db: Session, all_issues: list, target_project: str):
     dev_map = {}
     stuck_tickets = []
 
@@ -122,7 +102,6 @@ def _build_rich_project_context(db: Session, project_id: str, user_name: str) ->
         if issue.issue_type and issue.issue_type.lower() == "bug":
             dev_map[assignee]["bugs_count"] += 1
 
-        # Detectar tickets bloqueados o estancados
         if (issue.status_actual or "").lower() in ("bloqueado", "blocked", "en qa", "qa", "in review", "en revisión") or issue.priority in ("High", "Highest"):
             stuck_tickets.append({
                 "key": issue.key_issue,
@@ -132,7 +111,6 @@ def _build_rich_project_context(db: Session, project_id: str, user_name: str) ->
                 "priority": issue.priority
             })
 
-    # Resumen analítico por desarrollador
     dev_performance_list = []
     for dev_name, data in dev_map.items():
         avg_ct = round(sum(data["cycle_times"]) / max(len(data["cycle_times"]), 1), 1) if data["cycle_times"] else 2.5
@@ -146,7 +124,10 @@ def _build_rich_project_context(db: Session, project_id: str, user_name: str) ->
             "tareas_activas": data["active_tasks"][:4]
         })
 
-    # 4. Alertas del sistema
+    return dev_performance_list, stuck_tickets
+
+
+def _get_system_alerts_summary(db: Session) -> list:
     alerts_summary = []
     try:
         system_alerts = db.query(models.Alert).order_by(models.Alert.created_at.desc()).limit(5).all()
@@ -158,6 +139,32 @@ def _build_rich_project_context(db: Session, project_id: str, user_name: str) ->
             })
     except Exception:
         pass
+    return alerts_summary
+
+
+def _build_rich_project_context(db: Session, project_id: str, user_name: str) -> Dict[str, Any]:
+    """
+    Extrae un contexto analítico profundo y completo de la base de datos local:
+    - Salud del sprint y métricas de flujo
+    - Desempeño individual por desarrollador (SP, Cycle Time, WIP, Bugs, Tareas)
+    - Cuellos de botella e incidencias críticas
+    - Alertas operativas del sistema
+    """
+    target_project = _resolve_target_project_id(db, project_id)
+
+    sprint_health_data = {}
+    try:
+        sprint_health_data = calculate_sprint_health(db, target_project)
+    except Exception as e:
+        print("Aviso: No se pudo calcular sprint health para el chat de IA:", e)
+
+    issues_query = db.query(models.Issue)
+    if target_project and target_project != "ALL":
+        issues_query = issues_query.filter(models.Issue.id_proyecto == target_project)
+    all_issues = issues_query.all()
+
+    dev_performance_list, stuck_tickets = _aggregate_dev_performance(db, all_issues, target_project)
+    alerts_summary = _get_system_alerts_summary(db)
 
     return {
         "id_proyecto": target_project,
@@ -186,7 +193,7 @@ def chat_with_ai(
     POST /api/v1/ai/chat
     Recibe un mensaje del usuario y responde utilizando el motor conversacional analítico de Google Gemini.
     """
-    user_name = current_user.nombre if current_user and current_user.nombre else (current_user.email if current_user else "Usuario")
+    user_name = (current_user.nombre or current_user.email) if current_user else "Usuario"
     
     # Extraer el contexto real completo de la BD
     rich_context = _build_rich_project_context(db, payload.project_id, user_name)
@@ -216,6 +223,45 @@ def get_suggested_prompts():
         {"id": 4, "text": "¿Qué recomendaciones estratégicas tienes para el equipo?", "category": "Estrategia"}
     ]
 
+def _fetch_real_dev_history(db: Session, dev_id: str, dev_name: str, proj_id: str) -> list:
+    try:
+        from app.models.jira import Sprint, Issue
+        from sqlalchemy import desc
+
+        sprints = db.query(Sprint).filter(
+            Sprint.id_proyecto == proj_id,
+            Sprint.estado.in_(["closed", "cerrado", "finalizado", "active"])
+        ).order_by(desc(Sprint.fecha_fin)).limit(3).all()
+
+        history_data = []
+        for sprint in reversed(sprints):
+            issues = db.query(Issue).filter(
+                Issue.id_sprint == sprint.id_sprint,
+                ((Issue.assignee_id == dev_id) | (Issue.assignee_name.ilike(f"%{dev_name}%")))
+            ).all()
+
+            completados = len([i for i in issues if get_base_status(i.status_actual) == "DONE"])
+            bloqueos = len([i for i in issues if "bloqueado" in (i.status_actual or "").lower() or "blocked" in (i.status_actual or "").lower()])
+            ct_list = [get_issue_cycle_time_days(i) for i in issues if get_base_status(i.status_actual) == "DONE"]
+            ct_promedio = round(sum(ct_list) / len(ct_list), 1) if ct_list else 0.0
+
+            planned_sp = sum([(i.story_points or 0) for i in issues])
+            completed_sp = sum([(i.story_points or 0) for i in issues if get_base_status(i.status_actual) == "DONE"])
+
+            history_data.append({
+                "sprintName": sprint.nombre,
+                "ticketsCompletados": completados,
+                "cycleTime": ct_promedio,
+                "bloqueos": bloqueos,
+                "planned": planned_sp,
+                "completed": completed_sp
+            })
+        return history_data
+    except Exception as e:
+        print(f"Error fetching real dev history: {e}")
+        return []
+
+
 @router.post("/generate-report-insights")
 def ai_report_insights(
     payload: ReportInsightsRequest,
@@ -229,52 +275,13 @@ def ai_report_insights(
     """
     metrics = payload.dict()
     report_type = metrics.get('reportType', 'sprint')
-    
+
     # Inyectar datos históricos reales para desarrolladores
     if report_type == "desarrollador":
         dev_id = metrics.get("developerId")
         dev_name = metrics.get("developerName")
         proj_id = metrics.get("projectId") or "PROJ-01"
-        
-        try:
-            from app.models.jira import Sprint, Issue
-            from sqlalchemy import desc
-            
-            # Obtener los últimos 3 sprints cerrados
-            sprints = db.query(Sprint).filter(
-                Sprint.id_proyecto == proj_id,
-                Sprint.estado.in_(["closed", "cerrado", "finalizado", "active"])
-            ).order_by(desc(Sprint.fecha_fin)).limit(3).all()
-            
-            history_data = []
-            for sprint in reversed(sprints):  # Orden cronológico (más antiguo primero)
-                issues = db.query(Issue).filter(
-                    Issue.id_sprint == sprint.id_sprint,
-                    ((Issue.assignee_id == dev_id) | (Issue.assignee_name.ilike(f"%{dev_name}%")))
-                ).all()
-                
-                completados = len([i for i in issues if get_base_status(i.status_actual) == "DONE"])
-                bloqueos = len([i for i in issues if "bloqueado" in (i.status_actual or "").lower() or "blocked" in (i.status_actual or "").lower()])
-                
-                # Calcular Cycle Time promedio real
-                ct_list = [get_issue_cycle_time_days(i) for i in issues if get_base_status(i.status_actual) == "DONE"]
-                ct_promedio = round(sum(ct_list) / len(ct_list), 1) if ct_list else 0.0
-                
-                planned_sp = sum([(i.story_points or 0) for i in issues])
-                completed_sp = sum([(i.story_points or 0) for i in issues if get_base_status(i.status_actual) == "DONE"])
-                
-                history_data.append({
-                    "sprintName": sprint.nombre,
-                    "ticketsCompletados": completados,
-                    "cycleTime": ct_promedio,
-                    "bloqueos": bloqueos,
-                    "planned": planned_sp,
-                    "completed": completed_sp
-                })
-            metrics["history_data"] = history_data
-        except Exception as e:
-            print(f"Error fetching real dev history: {e}")
-            metrics["history_data"] = []
+        metrics["history_data"] = _fetch_real_dev_history(db, dev_id, dev_name, proj_id)
 
     
     # Textos por defecto en caso de fallo (fallback)

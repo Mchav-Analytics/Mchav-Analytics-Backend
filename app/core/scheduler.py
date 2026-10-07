@@ -12,11 +12,32 @@ from app.services.jira_sync import run_jira_sync
 
 _scheduler = None
 
-def scheduled_sync_job(user_id: int):
+def scheduled_sync_job(user_id: int = None):
     """
     Job programado por el Scheduler de APScheduler.
     Ejecuta la sincronización incremental para un usuario específico con bloqueo distribuido.
     """
+    if user_id is None:
+        db = SessionLocal()
+        try:
+            if log_repo.has_running_sync(db):
+                return
+            user = db.query(user_repo.model).filter(user_repo.model.activo.is_(True)).first()
+            if not user:
+                return
+            user_id = user.id_usuario
+            try:
+                res = run_jira_sync(user_id)
+                if asyncio.iscoroutine(res):
+                    asyncio.run(res)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        finally:
+            db.close()
+        return
+
     print(f"[Cron Scheduler] Adquiriendo candado y ejecutando job de sincronización para usuario ID {user_id}...")
     
     # Enviar petición HTTP al endpoint interno de FastAPI para delegar

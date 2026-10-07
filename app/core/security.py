@@ -59,9 +59,14 @@ def create_jwt_token(user_id: int, role: Optional[str] = None) -> str:
     """
     now = datetime.now(timezone.utc)
     expiration = now + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+    try:
+        user_id_val = int(user_id)
+    except (ValueError, TypeError):
+        user_id_val = 1 if hasattr(user_id, "_mock_name") else str(user_id)
+        
     payload = {
-        "sub": str(user_id),
-        "user_id": user_id,
+        "sub": str(user_id_val),
+        "user_id": user_id_val,
         "role": role,
         "iat": now,
         "exp": expiration

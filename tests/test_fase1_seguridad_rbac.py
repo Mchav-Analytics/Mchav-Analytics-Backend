@@ -9,13 +9,12 @@ from app.services import auth_service
 
 def test_restriccion_dominio_corporativo_grupoasd():
     """HU-001 CA-05: Rechazar usuarios que no pertenezcan al dominio @grupoasd.com"""
-    # 1. Correo que NO pertenece a @grupoasd.com debe ser rechazado con HTTP 403
-    with pytest.raises(HTTPException) as excinfo:
-        # Simular objeto profile sin dominio @grupoasd.com
-        profile_invalid = {"emailAddress": "usuario@gmail.com"}
-        user_email = profile_invalid.get("emailAddress", "")
-        if not user_email.lower().endswith("@grupoasd.com"):
+    def validate_corporate_domain(email: str):
+        if not email.lower().endswith("@grupoasd.com"):
             raise HTTPException(status_code=403, detail="Acceso denegado. Únicamente se admiten usuarios de la organización (@grupoasd.com).")
+
+    with pytest.raises(HTTPException) as excinfo:
+        validate_corporate_domain("usuario@gmail.com")
 
     assert excinfo.value.status_code == 403
 

@@ -20,6 +20,7 @@ from app.core.config import (
 AUTHORIZATION_BASE_URL = "https://auth.atlassian.com/authorize"
 TOKEN_URL = "https://auth.atlassian.com/oauth/token"
 RESOURCES_URL = "https://api.atlassian.com/oauth/token/accessible-resources"
+CONTENT_TYPE_JSON = "application/json"
 
 # Estado temporal en memoria para la protección contra ataques de falsificación de peticiones (CSRF OAuth)
 _oauth_states = set()
@@ -86,7 +87,7 @@ async def exchange_code_for_user_profile(code: str) -> dict:
         refresh_token = tokens.get("refresh_token")
 
         # Obtener la lista de sitios de Jira accesibles asociados al token
-        headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
+        headers = {"Authorization": f"Bearer {access_token}", "Accept": CONTENT_TYPE_JSON}
         resources_res = await client.get(RESOURCES_URL, headers=headers)
 
         if resources_res.status_code != 200:
@@ -141,7 +142,7 @@ async def _fetch_user_profile_with_fallback(client: httpx.AsyncClient, cloud_id:
     if JIRA_DOMAIN and JIRA_EMAIL and JIRA_API_TOKEN:
         print("[OAuth Callback] Atlassian OAuth Proxy limitado (429). Usando API Token fallback para obtener perfil...")
         creds = base64.b64encode(f"{JIRA_EMAIL}:{JIRA_API_TOKEN}".encode()).decode()
-        fallback_headers = {"Authorization": f"Basic {creds}", "Accept": "application/json"}
+        fallback_headers = {"Authorization": f"Basic {creds}", "Accept": CONTENT_TYPE_JSON}
         domain_url = JIRA_DOMAIN.rstrip('/')
         if not domain_url.startswith("http"):
             domain_url = f"https://{domain_url}"
@@ -175,7 +176,7 @@ async def verify_jira_api_credentials(domain: str, email: str, token: str) -> di
     encoded = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
     headers = {
         "Authorization": f"Basic {encoded}",
-        "Accept": "application/json"
+        "Accept": CONTENT_TYPE_JSON
     }
     test_url = f"{domain_clean}/rest/api/3/myself"
 

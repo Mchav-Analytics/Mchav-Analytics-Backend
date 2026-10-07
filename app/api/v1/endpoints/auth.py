@@ -4,7 +4,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.config import FRONTEND_URL
+from app.core.config import FRONTEND_URL, COOKIE_SECURE
 from app.core.database import get_db
 from app.core.security import sign_session_id
 from app.api.v1.deps import get_current_user_id  # 👈 Importamos la dependencia dual
@@ -12,6 +12,8 @@ from app.repositories import user_repo
 from app.services import auth_service
 
 router = APIRouter()
+
+MSG_USER_NOT_FOUND = "Usuario no encontrado"
 
 class JiraCredentialsPayload(BaseModel):
     jira_domain: str
@@ -29,7 +31,8 @@ def _get_authenticated_user(request: Request, credentials, db: Session):
 @router.get(
     "/me",
     summary="Obtener usuario actual",
-    description="Devuelve la información detallada del perfil, roles y estados de vinculación de Jira del usuario autenticado en la sesión actual o mediante un Bearer Token."
+    description="Devuelve la información detallada del perfil, roles y estados de vinculación de Jira del usuario autenticado en la sesión actual o mediante un Bearer Token.",
+    responses={401: {"description": MSG_USER_NOT_FOUND}}
 )
 async def get_current_user_info(
     request: Request, 
@@ -39,7 +42,7 @@ async def get_current_user_info(
     """Obtiene la información del usuario autenticado en la sesión actual o vía Bearer Token."""
     user = user_repo.get(db, user_id)
     if not user:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado")
+        raise HTTPException(status_code=401, detail=MSG_USER_NOT_FOUND)
         
     rol_nombre = user.rol.nombre_rol if user.rol else None
     
@@ -60,7 +63,8 @@ async def get_current_user_info(
 @router.get(
     "/jira-credentials",
     summary="Consultar estado de credenciales de Jira",
-    description="Retorna el dominio configurado, el correo electrónico y verifica si el usuario posee un API Token personal vinculado en el sistema."
+    description="Retorna el dominio configurado, el correo electrónico y verifica si el usuario posee un API Token personal vinculado en el sistema.",
+    responses={401: {"description": MSG_USER_NOT_FOUND}}
 )
 async def get_jira_credentials(
     request: Request, 
@@ -70,7 +74,7 @@ async def get_jira_credentials(
     """Obtiene el estado y dominio de vinculación de credenciales del usuario."""
     user = user_repo.get(db, user_id)
     if not user:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado")
+        raise HTTPException(status_code=401, detail=MSG_USER_NOT_FOUND)
         
     return {
         "jira_domain": user.jira_domain or "",
@@ -82,7 +86,8 @@ async def get_jira_credentials(
 @router.post(
     "/jira-credentials",
     summary="Guardar y verificar credenciales de Jira",
-    description="Prueba la conectividad contra la API de Jira utilizando el dominio, email y API Token provistos por el usuario, almacenándolos de forma segura si la validación es exitosa."
+    description="Prueba la conectividad contra la API de Jira utilizando el dominio, email y API Token provistos por el usuario, almacenándolos de forma segura si la validación es exitosa.",
+    responses={401: {"description": MSG_USER_NOT_FOUND}}
 )
 async def save_jira_credentials(
     payload: JiraCredentialsPayload, 
@@ -93,7 +98,7 @@ async def save_jira_credentials(
     """Prueba la conectividad con Jira y guarda el API Token personal del usuario."""
     user = user_repo.get(db, user_id)
     if not user:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado")
+        raise HTTPException(status_code=401, detail=MSG_USER_NOT_FOUND)
     
     verified_data = await auth_service.verify_jira_api_credentials(
         domain=payload.jira_domain,
@@ -127,7 +132,8 @@ def login():
 @router.get(
     "/callback",
     summary="Callback de autenticación OAuth 2.0",
-    description="Endpoint de retorno configurado en Atlassian. Valida el estado CSRF, intercambia el código de autorización por el perfil del usuario, crea o actualiza la cuenta localmente y establece la cookie de sesión cifrada antes de redirigir al frontend."
+    description="Endpoint de retorno configurado en Atlassian. Valida el estado CSRF, intercambia el código de autorización por el perfil del usuario, crea o actualiza la cuenta localmente y establece la cookie de sesión cifrada antes de redirigir al frontend.",
+    responses={400: {"description": "Estado (State) inválido o expirado"}}
 )
 async def callback(code: str, state: str, db: Session = Depends(get_db)):
     """Callback de OAuth 2.0 que procesa el código de Atlassian, crea la cookie de sesión y redirige."""
@@ -157,6 +163,7 @@ async def callback(code: str, state: str, db: Session = Depends(get_db)):
         key="session_id", 
         value=signed_session, 
         httponly=True, 
+        secure=COOKIE_SECURE,
         samesite='lax',
         path='/'
     )

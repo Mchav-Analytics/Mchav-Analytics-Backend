@@ -90,19 +90,20 @@ Proyecto Mchav/
 │   │   ├── repositories/        # Capa de Acceso a Datos (Pattern Repository)
 │   │   ├── schemas/             # Esquemas de Validación DTO (Pydantic)
 │   │   └── services/            # Servicios de Negocio (ETL, cálculo de KPIs y OAuth)
-│   ├── tests/                   # Suite de 94 Pruebas Unitarias e Integración (en Español)
-│   ├── docs/                    # Guías de Arquitectura y Documentación Técnica Backend
+│   ├── tests/                   # Suite completa de Pruebas Unitarias e Integración
+│   ├── scripts/                 # Scripts de utilidad y mantenimiento
 │   └── requirements.txt         # Lista de dependencias de Python
 │
 ├── Mchav-Frontend/              # Aplicación Web React + Vite + Tailwind CSS
-│   ├── src/
-│   │   ├── components/          # Componentes de UI reutilizables y Gráficos (Recharts)
-│   │   ├── pages/               # Páginas de Dashboard, Login, Mapeos y Proyectos
-│   │   └── services/            # Clientes de API Axios
+│   ├── src/                     # Código fuente modular (features, components, hooks, services)
 │   ├── package.json             # Dependencias del Frontend
 │   └── vite.config.js           # Configuración de Vite Bundler
 │
-└── Mchav Docs/                  # Documentación oficial de negocio (SRS, Project Charter, HUs)
+└── docs/                        # Documentación Técnica y de Negocio Unificada
+    ├── gestion_y_requisitos/    # SRS, Project Charter, HUs y Matrices de Hallazgos
+    ├── despliegue_y_arquitectura/ # Guías de despliegue AWS EC2 y automatizaciones
+    ├── frontend/                # Guías, pruebas Vitest y refactorización de vistas
+    └── backend/                 # Arquitectura de servicios y guías de backend
 ```
 
 ---

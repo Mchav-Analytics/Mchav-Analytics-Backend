@@ -9,6 +9,8 @@ from typing import List, Dict, Any, Optional
 
 from app.services.jira_normalizer import categorize_flow_state, DONE_STATUSES, IN_PROGRESS_STATUSES
 
+DEFAULT_INITIAL_STATE = "To Do"
+
 class FlowStateCategorizer:
     """
     Categoriza estados de Jira en ACTIVE, WAITING, BLOCKED, DONE.
@@ -83,7 +85,7 @@ def get_issue_flow_timeline(issue: models.Issue) -> List[Dict[str, Any]]:
 
     timeline = []
     # El primer estado comienza en created_at y termina en la primera transición
-    current_state = transitions[0].estado_anterior or "To Do"
+    current_state = transitions[0].estado_anterior or DEFAULT_INITIAL_STATE
     last_time = issue.created_at
     
     for t in transitions:
@@ -114,6 +116,39 @@ def get_issue_flow_timeline(issue: models.Issue) -> List[Dict[str, Any]]:
     
     return timeline
 
+def _compute_issue_cycle_time(timeline: List[Dict[str, Any]], categorizer: FlowStateCategorizer) -> float:
+    started_processing = False
+    total_seconds = 0.0
+    for t in timeline:
+        cat = categorizer.categorize_state(t["state"])
+        if cat in ["ACTIVE", "WAITING", "BLOCKED"] and not started_processing:
+            started_processing = True
+        if started_processing:
+            if cat == "DONE":
+                break
+            total_seconds += t["duration_seconds"]
+    return (total_seconds / 86400.0) if total_seconds > 0 else 0.0
+
+
+def _compute_percentiles_summary(cycle_times: List[float]) -> Dict[str, Any]:
+    if not cycle_times:
+        return {"avg": 0, "p50": 0, "p75": 0, "p85": 0, "p95": 0, "count": 0}
+    cycle_times.sort()
+    if len(cycle_times) >= 2:
+        quantiles = statistics.quantiles(cycle_times, n=100, method='inclusive')
+        p50, p75, p85, p95 = quantiles[49], quantiles[74], quantiles[84], quantiles[94]
+    else:
+        p50 = p75 = p85 = p95 = cycle_times[0]
+    return {
+        "avg": round(sum(cycle_times) / len(cycle_times), 1),
+        "p50": round(p50, 1),
+        "p75": round(p75, 1),
+        "p85": round(p85, 1),
+        "p95": round(p95, 1),
+        "count": len(cycle_times)
+    }
+
+
 def calculate_cycle_time_percentiles(db: Session, project_id: str, sprint_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Calcula percentiles de Cycle Time (P50, P75, P85, P95) usando solo tickets resueltos.
@@ -130,48 +165,29 @@ def calculate_cycle_time_percentiles(db: Session, project_id: str, sprint_id: Op
         return {"avg": 0, "p50": 0, "p75": 0, "p85": 0, "p95": 0, "count": 0}
         
     categorizer = FlowStateCategorizer(db, project_id)
-    cycle_times = []
-    
-    for issue in issues:
-        timeline = get_issue_flow_timeline(issue)
-        started_processing = False
-        total_seconds = 0
-        
-        for t in timeline:
-            cat = categorizer.categorize_state(t["state"])
-            if cat in ["ACTIVE", "WAITING", "BLOCKED"] and not started_processing:
-                started_processing = True
-                
-            if started_processing:
-                if cat == "DONE":
-                    break
-                total_seconds += t["duration_seconds"]
-                
-        if total_seconds > 0:
-            cycle_times.append(total_seconds / 86400.0) # a días
-            
-    if not cycle_times:
-         return {"avg": 0, "p50": 0, "p75": 0, "p85": 0, "p95": 0, "count": 0}
+    cycle_times = [
+        ct for issue in issues
+        if (ct := _compute_issue_cycle_time(get_issue_flow_timeline(issue), categorizer)) > 0
+    ]
+    return _compute_percentiles_summary(cycle_times)
 
-    cycle_times.sort()
-    
-    if len(cycle_times) >= 2:
-        quantiles = statistics.quantiles(cycle_times, n=100, method='inclusive')
-        p50 = quantiles[49]
-        p75 = quantiles[74]
-        p85 = quantiles[84]
-        p95 = quantiles[94]
-    else:
-        p50 = p75 = p85 = p95 = cycle_times[0]
-        
-    return {
-        "avg": round(sum(cycle_times) / len(cycle_times), 1),
-        "p50": round(p50, 1),
-        "p75": round(p75, 1),
-        "p85": round(p85, 1),
-        "p95": round(p95, 1),
-        "count": len(cycle_times)
-    }
+
+def _accumulate_flow_durations(timeline: List[Dict[str, Any]], categorizer: FlowStateCategorizer) -> tuple[float, float, float]:
+    started_processing = False
+    active = waiting = blocked = 0.0
+    for t in timeline:
+        cat = categorizer.categorize_state(t["state"])
+        if cat in ["ACTIVE", "WAITING", "BLOCKED"] and not started_processing:
+            started_processing = True
+        if started_processing and cat != "DONE":
+            if cat == "ACTIVE":
+                active += t["duration_seconds"]
+            elif cat == "WAITING":
+                waiting += t["duration_seconds"]
+            elif cat == "BLOCKED":
+                blocked += t["duration_seconds"]
+    return active, waiting, blocked
+
 
 def calculate_flow_efficiency(db: Session, project_id: str, sprint_id: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -189,22 +205,10 @@ def calculate_flow_efficiency(db: Session, project_id: str, sprint_id: Optional[
     total_blocked = 0.0
     
     for issue in issues:
-        timeline = get_issue_flow_timeline(issue)
-        started_processing = False
-        
-        for t in timeline:
-            cat = categorizer.categorize_state(t["state"])
-            
-            if cat in ["ACTIVE", "WAITING", "BLOCKED"] and not started_processing:
-                started_processing = True
-                
-            if started_processing and cat != "DONE":
-                if cat == "ACTIVE":
-                    total_active += t["duration_seconds"]
-                elif cat == "WAITING":
-                    total_waiting += t["duration_seconds"]
-                elif cat == "BLOCKED":
-                    total_blocked += t["duration_seconds"]
+        act, wt, bl = _accumulate_flow_durations(get_issue_flow_timeline(issue), categorizer)
+        total_active += act
+        total_waiting += wt
+        total_blocked += bl
 
     total = total_active + total_waiting + total_blocked
     if total == 0:
@@ -220,61 +224,42 @@ def calculate_flow_efficiency(db: Session, project_id: str, sprint_id: Optional[
         "blocked_days": round(total_blocked / 86400.0, 1)
     }
 
-def detect_bottlenecks(db: Session, project_id: str, sprint_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    query = db.query(models.Issue).filter(models.Issue.id_proyecto == project_id)
-    if sprint_id:
-        query = query.filter(models.Issue.id_sprint == sprint_id)
-        
-    issues = query.all()
-    categorizer = FlowStateCategorizer(db, project_id)
-    
+
+def _collect_state_durations(issues, categorizer: FlowStateCategorizer):
     state_durations = {}
     state_active_issues = {}
-    
     for issue in issues:
         timeline = get_issue_flow_timeline(issue)
-        
         for t in timeline:
             state = t["state"]
             cat = categorizer.categorize_state(state)
-            if cat in ["DONE", "To Do"]: continue
-            
+            if cat in ["DONE", "To Do"]:
+                continue
             duration = t["duration_seconds"] / 86400.0
-            
             if state not in state_durations:
                 state_durations[state] = []
                 state_active_issues[state] = 0
-                
             state_durations[state].append(duration)
-            
         if not issue.resolved_at:
             curr_state = issue.status_actual
-            if curr_state in state_active_issues:
-                state_active_issues[curr_state] += 1
-            else:
-                state_active_issues[curr_state] = 1
+            state_active_issues[curr_state] = state_active_issues.get(curr_state, 0) + 1
+    return state_durations, state_active_issues
 
+
+def _format_bottleneck_results(state_durations, state_active_issues, total_all_durations):
     results = []
-    total_all_durations = sum(sum(durs) for durs in state_durations.values())
-    
     for state, durations in state_durations.items():
         if not durations:
             continue
-            
         durations.sort()
         count = len(durations)
         avg = sum(durations) / count
-        
         if count >= 2:
             quantiles = statistics.quantiles(durations, n=100, method='inclusive')
-            p50 = quantiles[49]
-            p75 = quantiles[74]
-            p95 = quantiles[94]
+            p50, p75, p95 = quantiles[49], quantiles[74], quantiles[94]
         else:
             p50 = p75 = p95 = durations[0]
-            
         pct_of_total = (sum(durations) / total_all_durations * 100) if total_all_durations > 0 else 0
-            
         results.append({
             "state": state,
             "avg": round(avg, 1),
@@ -284,9 +269,21 @@ def detect_bottlenecks(db: Session, project_id: str, sprint_id: Optional[str] = 
             "current_issues": state_active_issues.get(state, 0),
             "pct_of_total": round(pct_of_total, 1)
         })
-        
     results.sort(key=lambda x: x["p75"], reverse=True)
     return results
+
+
+def detect_bottlenecks(db: Session, project_id: str, sprint_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    query = db.query(models.Issue).filter(models.Issue.id_proyecto == project_id)
+    if sprint_id:
+        query = query.filter(models.Issue.id_sprint == sprint_id)
+        
+    issues = query.all()
+    categorizer = FlowStateCategorizer(db, project_id)
+    state_durations, state_active_issues = _collect_state_durations(issues, categorizer)
+    total_all_durations = sum(sum(durs) for durs in state_durations.values())
+    return _format_bottleneck_results(state_durations, state_active_issues, total_all_durations)
+
 
 def get_blockers(db: Session, project_id: str) -> List[Dict[str, Any]]:
     issues = db.query(models.Issue).filter(
@@ -316,6 +313,19 @@ def get_blockers(db: Session, project_id: str) -> List[Dict[str, Any]]:
     blockers.sort(key=lambda x: x["duration_days"], reverse=True)
     return blockers
 
+
+def _calculate_issue_aging_seconds(timeline: List[Dict[str, Any]], categorizer: FlowStateCategorizer) -> tuple[bool, float]:
+    started_processing = False
+    total_seconds = 0.0
+    for t in timeline:
+        cat = categorizer.categorize_state(t["state"])
+        if cat in ["ACTIVE", "WAITING", "BLOCKED"] and not started_processing:
+            started_processing = True
+        if started_processing:
+            total_seconds += t["duration_seconds"]
+    return started_processing, total_seconds
+
+
 def get_aging_work(db: Session, project_id: str) -> List[Dict[str, Any]]:
     issues = db.query(models.Issue).filter(
         models.Issue.id_proyecto == project_id,
@@ -326,19 +336,8 @@ def get_aging_work(db: Session, project_id: str) -> List[Dict[str, Any]]:
     aging_list = []
     
     for issue in issues:
-        timeline = get_issue_flow_timeline(issue)
-        started_processing = False
-        total_seconds = 0
-        
-        for t in timeline:
-            cat = categorizer.categorize_state(t["state"])
-            if cat in ["ACTIVE", "WAITING", "BLOCKED"] and not started_processing:
-                started_processing = True
-                
-            if started_processing:
-                total_seconds += t["duration_seconds"]
-                
-        if started_processing and total_seconds > 0:
+        started, total_seconds = _calculate_issue_aging_seconds(get_issue_flow_timeline(issue), categorizer)
+        if started and total_seconds > 0:
             aging_list.append({
                 "issue_key": issue.key_issue,
                 "title": issue.summary,
@@ -350,6 +349,32 @@ def get_aging_work(db: Session, project_id: str) -> List[Dict[str, Any]]:
             
     aging_list.sort(key=lambda x: x["aging_days"], reverse=True)
     return aging_list
+
+
+def _to_naive_utc(dt, now_dt):
+    if dt is None:
+        return now_dt
+    if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _resolve_issue_state_at_day(issue, day_end, now_dt):
+    issue_created = _to_naive_utc(issue.created_at, now_dt)
+    if issue_created > day_end:
+        return None
+    timeline = get_issue_flow_timeline(issue)
+    state_at_day = None
+    for t in timeline:
+        start = _to_naive_utc(t["start"], now_dt)
+        end = _to_naive_utc(t["end"], now_dt)
+        if start <= day_end and end >= day_end:
+            state_at_day = t["state"]
+            break
+        elif end <= day_end:
+            state_at_day = t["state"]
+    return state_at_day
+
 
 def calculate_cfd_and_wip(db: Session, project_id: str, sprint_id: Optional[str] = None) -> Dict[str, Any]:
     query = db.query(models.Issue).filter(models.Issue.id_proyecto == project_id)
@@ -371,40 +396,16 @@ def calculate_cfd_and_wip(db: Session, project_id: str, sprint_id: Optional[str]
                 total_wip += 1
                 
     cfd_data = []
-    now = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC para comparar con timeline
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     start_date = now - timedelta(days=30)
-
-    def to_naive_utc(dt):
-        """Convierte cualquier datetime a naive UTC para comparaciones consistentes."""
-        if dt is None:
-            return now
-        if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
-            return dt.astimezone(timezone.utc).replace(tzinfo=None)
-        return dt
 
     for i in range(31):
         day = start_date + timedelta(days=i)
         day_end = day.replace(hour=23, minute=59, second=59)
-
         day_counts = {"To Do": 0, "Active": 0, "Waiting": 0, "Blocked": 0, "Done": 0}
 
         for issue in issues:
-            issue_created = to_naive_utc(issue.created_at)
-            if issue_created > day_end:
-                continue
-
-            timeline = get_issue_flow_timeline(issue)
-            state_at_day = None
-            for t in timeline:
-                start = to_naive_utc(t["start"])
-                end = to_naive_utc(t["end"])
-
-                if start <= day_end and end >= day_end:
-                    state_at_day = t["state"]
-                    break
-                elif end <= day_end:
-                    state_at_day = t["state"]
-
+            state_at_day = _resolve_issue_state_at_day(issue, day_end, now)
             if state_at_day:
                 cat = categorizer.categorize_state(state_at_day)
                 if cat == "ACTIVE": day_counts["Active"] += 1

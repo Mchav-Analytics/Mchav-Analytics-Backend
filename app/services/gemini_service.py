@@ -22,6 +22,30 @@ def is_gemini_configured() -> bool:
     return bool(GEMINI_API_KEY and len(GEMINI_API_KEY) > 10)
 
 
+def _extract_gemini_response_text(res_data: dict) -> Optional[str]:
+    candidates = res_data.get("candidates", [])
+    if candidates:
+        parts = candidates[0].get("content", {}).get("parts", [])
+        if parts and "text" in parts[0]:
+            return parts[0]["text"].strip()
+    return None
+
+
+def _try_call_gemini_model(client: httpx.Client, model: str, payload: dict) -> Optional[str]:
+    url = f"{GEMINI_API_ENDPOINT}/{model}:generateContent?key={GEMINI_API_KEY}"
+    try:
+        response = client.post(url, json=payload)
+        if response.status_code == 200:
+            return _extract_gemini_response_text(response.json())
+        if response.status_code == 404:
+            print(f"Modelo Gemini '{model}' no disponible (404), intentando siguiente modelo...")
+        else:
+            print(f"Aviso Gemini API ({model} HTTP {response.status_code}): {response.text[:150]}")
+    except Exception as e:
+        print(f"Error conectando con Google Gemini API ({model}): {e}")
+    return None
+
+
 def _call_gemini_rest_api(prompt: str, temperature: float = 0.4, max_tokens: int = 350) -> Optional[str]:
     """
     Realiza una petición HTTP directa a la API REST de Google Gemini.
@@ -49,23 +73,9 @@ def _call_gemini_rest_api(prompt: str, temperature: float = 0.4, max_tokens: int
 
     with httpx.Client(timeout=30.0) as client:
         for model in candidate_models:
-            url = f"{GEMINI_API_ENDPOINT}/{model}:generateContent?key={GEMINI_API_KEY}"
-            try:
-                response = client.post(url, json=payload)
-                if response.status_code == 200:
-                    res_data = response.json()
-                    candidates = res_data.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        if parts and "text" in parts[0]:
-                            return parts[0]["text"].strip()
-                elif response.status_code == 404:
-                    print(f"Modelo Gemini '{model}' no disponible (404), intentando siguiente modelo...")
-                    continue
-                else:
-                    print(f"Aviso Gemini API ({model} HTTP {response.status_code}): {response.text[:150]}")
-            except Exception as e:
-                print(f"Error conectando con Google Gemini API ({model}): {e}")
+            text = _try_call_gemini_model(client, model, payload)
+            if text:
+                return text
 
     return None
 
@@ -102,6 +112,7 @@ Datos reales del desarrollador:
 - Entregas completadas en este sprint: {completed} tickets.
 - Porcentaje de entregas sin reabrir bugs: {clean_pct}%.
 - Bugs prioritarios en QA pendientes: {qa_bugs_str}.
+- Tareas activas en desarrollo: {len(active_dev or [])} tickets.
 
 Reglas de respuesta:
 1. Responde en español en exactamente 2 o 3 frases directas y motivadoras.
@@ -238,7 +249,6 @@ def chat_with_gemini(user_message: str, context_info: dict = None, conversation_
 
     context_info = context_info or {}
     user_name = context_info.get("user_name", "Usuario")
-    proj_id = context_info.get("id_proyecto", "PROJ-01")
     
     # Formatear la lista de desarrolladores individualmente
     devs_data = context_info.get("desempeno_desarrolladores_individual", [])
@@ -318,6 +328,7 @@ DATOS ANALÍTICOS REALES Y UNIFICADOS DEL PROYECTO:
 - Tiempo de ciclo promedio: {ct} días hábiles (excluyendo fines de semana y festivos).
 - Días bloqueados acumulados: {bd} días.
 - Bugs / Defectos escapados: {bugs}.
+- Alcance total planificado inicialmente: {planned} Story Points.
 - Alcance total evaluado: {scope} Story Points.
 - Salud global del proyecto (Health Score): {health}/100 pts.
 - Percentiles de Cycle Time: P50 (Mediana)={p50} días, P85 (SLA objetivo)={p85} días, P95 (Outliers)={p95} días.
@@ -372,6 +383,12 @@ No uses formato de 'plantilla de IA'. Escribe párrafos fluidos y profesionales 
 === HISTORIAL RECIENTE ===
 {history_str}
 ==========================
+
+DATOS CONSOLIDADOS DEL DESARROLLADOR:
+- Story Points completados: {v} SP (de {planned} SP comprometidos, {pct}% de {scope} SP).
+- Tickets/Tareas cerradas: {t}.
+- Cycle Time personal promedio: {ct} días hábiles (P50: {p50}d, P85: {p85}d, P95: {p95}d).
+- Días bloqueados acumulados: {bd} días. Bugs detectados: {bugs}. Salud del flujo: {health}/100.
 
 ESTRUCTURA ESTRICTA DE CADA SECCIÓN (OBLIGATORIO):
 El sistema UI separa el reporte usando etiquetas '# 0X — TITULO'.
@@ -578,7 +595,7 @@ def generate_report_insights(metrics: dict, fallback: dict, report_type: str = "
         return cached
 
     if not is_gemini_configured():
-        return _get_fallback_insights(report_type)
+        return fallback if fallback else _get_fallback_insights(report_type)
 
     if is_leader:
         v = metrics.get("velocity", 0)
@@ -874,8 +891,8 @@ def _build_lider_sprint_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p95,
     return f"""
 Actúa como un Asistente Analítico Experto del Líder Técnico y Facilitador Ágil. No te presentes, no digas tu nombre ni uses saludos iniciales.
 Analiza el sprint con los siguientes datos empíricos:
-Velocidad entregada: {v} SP (de {planned} SP planificados, {pct}% de cumplimiento). Throughput: {t} tickets cerrados. Stories/tareas en deuda (Spillover): {spillover} SP.
-Cycle Time medio: {ct} días hábiles (descontando fines de semana y festivos). Bloqueos acumulados: {bd} días. Defectos: {bugs} bugs. Salud del Sprint: {health}/100.
+Velocidad entregada: {v} SP (de {planned} SP planificados, {pct}% de cumplimiento, alcance total: {scope} SP). Throughput: {t} tickets cerrados. Stories/tareas en deuda (Spillover): {spillover} SP.
+Cycle Time medio: {ct} días hábiles (P50: {p50}d, P85: {p85}d, P95: {p95}d, descontando fines de semana y festivos). Bloqueos acumulados: {bd} días. Defectos: {bugs} bugs. Salud del Sprint: {health}/100.
 
 REGLAS OBLIGATORIAS DE TONO Y ESTILO:
 1. Utiliza un tono estrictamente constructivo, técnico y facilitador de equipo.
@@ -907,7 +924,7 @@ def _build_lider_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p9
     return f"""
 Actúa como un Asistente Analítico Experto del Líder Técnico y Facilitador Ágil. No te presentes, no digas tu nombre ni uses saludos iniciales.
 Analiza el proyecto con los datos:
-Velocidad entregada: {v} SP de {planned} SP planificados ({pct}% de cumplimiento). Throughput: {t} tickets resueltos. Tareas en deuda: {spillover} SP. Cycle Time medio: {ct} días hábiles (descontando fines de semana); P85: {p85}d; P95: {p95}d. Días bloqueados: {bd}. Bugs: {bugs}. Salud: {health}/100.
+Velocidad entregada: {v} SP de {planned} SP planificados ({pct}% de cumplimiento, alcance total: {scope} SP). Throughput: {t} tickets resueltos. Tareas en deuda: {spillover} SP. Cycle Time medio: {ct} días hábiles (P50: {p50}d, P85: {p85}d, P95: {p95}d). Días bloqueados: {bd}. Bugs: {bugs}. Salud: {health}/100.
 
 REGLAS OBLIGATORIAS DE TONO Y ESTILO:
 1. Utiliza un tono constructivo, de soporte y enfocado en la mejora continua del equipo.
@@ -952,7 +969,7 @@ def _build_cierre_proyecto_prompt(v, t, ct, bd, bugs, scope, health, p50, p85, p
     return f"""
 Actúa como un Director Ejecutivo y Asistente Analítico. No te presentes, no digas tu nombre ni uses saludos iniciales.
 Genera el informe de CIERRE MENSUAL DEL PROYECTO con los datos:
-Velocidad entregada: {v} SP. Throughput: {t} tickets resueltos. Tareas en deuda: {spillover} SP. Cycle Time medio: {ct} días hábiles. Días bloqueados: {bd}. Bugs: {bugs}.
+Velocidad entregada: {v} SP (de {planned} SP planificados, {pct}% de {scope} SP). Throughput: {t} tickets resueltos. Tareas en deuda: {spillover} SP. Cycle Time medio: {ct} días hábiles (P50: {p50}d, P85: {p85}d, P95: {p95}d). Días bloqueados: {bd}. Bugs: {bugs}.
 
 REGLAS OBLIGATORIAS:
 1. Tono ejecutivo, estratégico y orientado a resultados de negocio del mes.
@@ -986,10 +1003,11 @@ Propón 3 recomendaciones específicas o directrices ejecutivas para el mes que 
 """
 
 def _build_lider_desarrollador_prompt(metrics, v, t, ct, bd, bugs, scope, health, p50, p85, p95, planned, pct):
+    dev_name = metrics.get('developerName') or 'el desarrollador'
     return f"""
 Actúa como un Asistente Analítico Experto del Líder Técnico. No te presentes, no digas tu nombre ni uses saludos iniciales.
-Analiza la actividad del desarrollador con los datos:
-Story Points completados: {v} SP. Tareas cerradas: {t}. Cycle Time personal: {ct} días hábiles. Días de bloqueo: {bd}. Bugs reabiertos: {bugs}.
+Analiza la actividad de {dev_name} con los datos:
+Story Points completados: {v} SP (de {planned} SP planificados, {pct}% de {scope} SP). Tareas cerradas: {t}. Cycle Time personal: {ct} días hábiles (P50: {p50}d, P85: {p85}d, P95: {p95}d). Días de bloqueo: {bd}. Bugs reabiertos: {bugs}. Salud general: {health}/100.
 
 REGLAS DE TONO: Tono positivo, de coaching técnico y crecimiento profesional. Cero lenguaje punitivo o jerárquico.
 

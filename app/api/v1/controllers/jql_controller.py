@@ -3,7 +3,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Annotated
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import httpx
@@ -24,17 +24,7 @@ class JQLExecutionPayload(BaseModel):
     jql: str
     max_results: Optional[int] = 50
 
-def validate_jql_syntax(jql: str) -> bool:
-    """
-    HU-009 CA-02: Valida sintácticamente una consulta JQL previa a su ejecución.
-    Verifica paréntesis balanceados, comillas abiertas/cerradas y palabras clave válidas.
-    """
-    if not jql or not jql.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Sintaxis JQL inválida: La consulta no puede estar vacía."
-        )
-
+def _check_balanced_quotes_and_brackets(jql: str) -> None:
     stack = []
     in_quotes = False
     quote_char = None
@@ -69,6 +59,8 @@ def validate_jql_syntax(jql: str) -> bool:
             detail="Sintaxis JQL inválida: Paréntesis de apertura '(' sin cerrar."
         )
 
+
+def _check_jql_keywords(jql: str) -> None:
     import re
     jql_upper = jql.upper()
     pattern = r'(\b(PROJECT|STATUS|CREATED|UPDATED|ISSUETYPE|ASSIGNEE|PRIORITY|SPRINT|STATUSCATEGORY|ORDER|AND|OR|IN|IS|WAS)\b|=|\!=|~)'
@@ -78,17 +70,32 @@ def validate_jql_syntax(jql: str) -> bool:
             status_code=400,
             detail="Sintaxis JQL inválida: La consulta no contiene un campo o filtro JQL reconocido (ejemplo: project = 'MCHAV')."
         )
+
+
+def validate_jql_syntax(jql: str) -> bool:
+    """
+    HU-009 CA-02: Valida sintácticamente una consulta JQL previa a su ejecución.
+    Verifica paréntesis balanceados, comillas abiertas/cerradas y palabras clave válidas.
+    """
+    if not jql or not jql.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Sintaxis JQL inválida: La consulta no puede estar vacía."
+        )
+    _check_balanced_quotes_and_brackets(jql)
+    _check_jql_keywords(jql)
     return True
 
 @router.post(
     "/execute",
     summary="Ejecutar consulta JQL personalizada (HU-009)",
-    description="Valida la sintaxis JQL e invoca la API REST de Jira retornando los resultados paginados."
+    description="Valida la sintaxis JQL e invoca la API REST de Jira retornando los resultados paginados.",
+    responses={400: {"description": "Sintaxis JQL inválida o error al ejecutar la consulta"}}
 )
 async def execute_custom_jql(
     payload: JQLExecutionPayload,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Annotated[Session, Depends(get_db)]
 ):
     user_id = deps.get_current_user_id(request)
     user = deps.check_user_exists(db, user_id)

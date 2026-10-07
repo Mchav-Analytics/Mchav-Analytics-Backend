@@ -20,6 +20,8 @@ from app.services.sprint_health_service import calculate_sprint_health, calculat
 # Sub-router para la gestión de proyectos
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
+UTC_OFFSET_STR = "+00:00"
+
 @router.get("/{proyecto_id}/health")
 @router.get("/{proyecto_id}/sprints/{sprint_id}/health")
 async def get_sprint_health_metrics(
@@ -133,14 +135,14 @@ async def get_project_kpis(
         
     if fecha_inicio:
         try:
-            dt_start = datetime.fromisoformat(fecha_inicio.replace("Z", "+00:00"))
+            dt_start = datetime.fromisoformat(fecha_inicio.replace("Z", UTC_OFFSET_STR))
             query = query.filter(models.KpisHistoricos.fecha_calculo >= dt_start)
         except ValueError:
             pass
 
     if fecha_fin:
         try:
-            dt_end = datetime.fromisoformat(fecha_fin.replace("Z", "+00:00"))
+            dt_end = datetime.fromisoformat(fecha_fin.replace("Z", UTC_OFFSET_STR))
             query = query.filter(models.KpisHistoricos.fecha_calculo <= dt_end)
         except ValueError:
             pass
@@ -156,6 +158,92 @@ async def get_project_kpis(
         
     kpis = query.offset(offset).limit(limit).all()
     return kpis
+
+def _filter_kpi_issues(query, sprint_id, metric_type, fecha_inicio, fecha_fin, assignee_email, assignee_name):
+    if sprint_id:
+        query = query.filter(models.Issue.id_sprint == sprint_id)
+        
+    if assignee_email or assignee_name:
+        conditions = []
+        if assignee_email:
+            conditions.append(models.Issue.assignee_email == assignee_email)
+        if assignee_name:
+            conditions.append(models.Issue.assignee_name.ilike(f"%{assignee_name}%"))
+        if conditions:
+            from sqlalchemy import or_
+            query = query.filter(or_(*conditions))
+
+    if metric_type in ("lead_time", "cycle_time", "throughput"):
+        query = query.filter(models.Issue.resolved_at.isnot(None))
+    elif metric_type == "bugs":
+        query = query.filter(
+            models.Issue.issue_type.ilike("%bug%") |
+            models.Issue.issue_type.ilike("%error%") |
+            models.Issue.issue_type.ilike("%defecto%") |
+            models.Issue.summary.ilike("%bug%") |
+            models.Issue.summary.ilike("%error%")
+        )
+
+    if fecha_inicio:
+        try:
+            dt_start = datetime.fromisoformat(fecha_inicio.replace("Z", UTC_OFFSET_STR))
+            query = query.filter(models.Issue.created_at >= dt_start)
+        except ValueError:
+            pass
+
+    if fecha_fin:
+        try:
+            dt_end = datetime.fromisoformat(fecha_fin.replace("Z", UTC_OFFSET_STR))
+            query = query.filter(models.Issue.created_at <= dt_end)
+        except ValueError:
+            pass
+
+    return query
+
+
+def _calculate_cycle_time(issue, in_prog_statuses, lead_time):
+    if not issue.resolved_at:
+        return 0.0
+    transitions = sorted(issue.transiciones, key=lambda t: t.fecha_cambio)
+    first_prog = None
+    for t in transitions:
+        if t.estado_nuevo and t.estado_nuevo.lower() in in_prog_statuses:
+            first_prog = t.fecha_cambio
+            break
+    if first_prog:
+        delta_c = issue.resolved_at - first_prog
+        return round(max(0.0, delta_c.total_seconds() / 86400.0), 2)
+    return lead_time
+
+
+def _map_issue_detail_dict(issue, in_prog_statuses):
+    lead_time = 0.0
+    if issue.resolved_at and issue.created_at:
+        delta = issue.resolved_at - issue.created_at
+        lead_time = round(max(0.0, delta.total_seconds() / 86400.0), 2)
+
+    cycle_time = _calculate_cycle_time(issue, in_prog_statuses, lead_time)
+    sprint_nombre = issue.sprint_activo.nombre if issue.sprint_activo else "Sin Sprint"
+
+    return {
+        "id_jira": issue.id_jira,
+        "key_issue": issue.key_issue,
+        "summary": issue.summary,
+        "status_actual": issue.status_actual,
+        "story_points": float(issue.story_points or 0.0),
+        "created_at": issue.created_at.isoformat() if issue.created_at else None,
+        "resolved_at": issue.resolved_at.isoformat() if issue.resolved_at else None,
+        "lead_time_days": lead_time,
+        "cycle_time_days": cycle_time,
+        "sprint_nombre": sprint_nombre,
+        "assignee_name": getattr(issue, "assignee_name", None) or "Sin Asignar",
+        "issue_type": getattr(issue, "issue_type", None) or "Story",
+        "priority": getattr(issue, "priority", None) or "Medium",
+        "epic_key": getattr(issue, "epic_key", None),
+        "epic_name": getattr(issue, "epic_name", None),
+        "components": getattr(issue, "components", None)
+    }
+
 
 @router.get("/{proyecto_id}/kpis/issues-detail")
 async def get_project_kpis_issues_detail(
@@ -180,46 +268,7 @@ async def get_project_kpis_issues_detail(
     deps.check_user_exists(db, user_id)
 
     query = db.query(models.Issue).filter(models.Issue.id_proyecto == proyecto_id)
-
-    if sprint_id:
-        query = query.filter(models.Issue.id_sprint == sprint_id)
-        
-    if assignee_email or assignee_name:
-        conditions = []
-        if assignee_email:
-            conditions.append(models.Issue.assignee_email == assignee_email)
-        if assignee_name:
-            conditions.append(models.Issue.assignee_name.ilike(f"%{assignee_name}%"))
-        
-        if conditions:
-            from sqlalchemy import or_
-            query = query.filter(or_(*conditions))
-
-    # Filtrar según el tipo de métrica deseado
-    if metric_type in ("lead_time", "cycle_time", "throughput"):
-        query = query.filter(models.Issue.resolved_at.isnot(None))
-    elif metric_type == "bugs":
-        query = query.filter(
-            models.Issue.issue_type.ilike("%bug%") |
-            models.Issue.issue_type.ilike("%error%") |
-            models.Issue.issue_type.ilike("%defecto%") |
-            models.Issue.summary.ilike("%bug%") |
-            models.Issue.summary.ilike("%error%")
-        )
-
-    if fecha_inicio:
-        try:
-            dt_start = datetime.fromisoformat(fecha_inicio.replace("Z", "+00:00"))
-            query = query.filter(models.Issue.created_at >= dt_start)
-        except ValueError:
-            pass
-
-    if fecha_fin:
-        try:
-            dt_end = datetime.fromisoformat(fecha_fin.replace("Z", "+00:00"))
-            query = query.filter(models.Issue.created_at <= dt_end)
-        except ValueError:
-            pass
+    query = _filter_kpi_issues(query, sprint_id, metric_type, fecha_inicio, fecha_fin, assignee_email, assignee_name)
 
     total_count = query.count()
     issues = query.order_by(models.Issue.created_at.desc()).offset(offset).limit(limit).all()
@@ -228,53 +277,61 @@ async def get_project_kpis_issues_detail(
     mappings = mapping_repo.get_by_project_and_base(db, proyecto_id, "IN_PROGRESS")
     in_prog_statuses = {m.estado_jira.lower().strip() for m in mappings} if mappings else IN_PROGRESS_STATUSES
 
-    result = []
-    for issue in issues:
-        lead_time = 0.0
-        if issue.resolved_at and issue.created_at:
-            delta = issue.resolved_at - issue.created_at
-            lead_time = round(max(0.0, delta.total_seconds() / 86400.0), 2)
-
-        cycle_time = 0.0
-        if issue.resolved_at:
-            transitions = sorted(issue.transiciones, key=lambda t: t.fecha_cambio)
-            first_prog = None
-            for t in transitions:
-                if t.estado_nuevo and t.estado_nuevo.lower() in in_prog_statuses:
-                    first_prog = t.fecha_cambio
-                    break
-            if first_prog:
-                delta_c = issue.resolved_at - first_prog
-                cycle_time = round(max(0.0, delta_c.total_seconds() / 86400.0), 2)
-            else:
-                cycle_time = lead_time
-
-        sprint_nombre = issue.sprint_activo.nombre if issue.sprint_activo else "Sin Sprint"
-
-        result.append({
-            "id_jira": issue.id_jira,
-            "key_issue": issue.key_issue,
-            "summary": issue.summary,
-            "status_actual": issue.status_actual,
-            "story_points": float(issue.story_points or 0.0),
-            "created_at": issue.created_at.isoformat() if issue.created_at else None,
-            "resolved_at": issue.resolved_at.isoformat() if issue.resolved_at else None,
-            "lead_time_days": lead_time,
-            "cycle_time_days": cycle_time,
-            "sprint_nombre": sprint_nombre,
-            "assignee_name": getattr(issue, "assignee_name", None) or "Sin Asignar",
-            "issue_type": getattr(issue, "issue_type", None) or "Story",
-            "priority": getattr(issue, "priority", None) or "Medium",
-            "epic_key": getattr(issue, "epic_key", None),
-            "epic_name": getattr(issue, "epic_name", None),
-            "components": getattr(issue, "components", None)
-        })
+    result = [_map_issue_detail_dict(issue, in_prog_statuses) for issue in issues]
 
     return {
         "proyecto_id": proyecto_id,
         "total_issues": total_count,
         "issues": result
     }
+
+
+def _calculate_sprint_points(db: Session, sp_id: Optional[str]):
+    if not sp_id:
+        return 0.0, 0.0, 0
+    done_statuses = {"done", "listo", "resuelto", "resolved", "cerrado", "closed", "finalizado", "completado"}
+    issues_in_sprint = db.query(models.Issue).filter(models.Issue.id_sprint == sp_id).all()
+    sp_comp = 0.0
+    sp_done = 0.0
+    for issue in issues_in_sprint:
+        pts = float(issue.story_points or 0.0)
+        sp_comp += pts
+        status = (issue.status_actual or "").lower().strip()
+        if status in done_statuses:
+            sp_done += pts
+    return sp_comp, sp_done, len(issues_in_sprint)
+
+
+def _to_date_str(val):
+    if val is None:
+        return None
+    return val.isoformat() if hasattr(val, "isoformat") else str(val)
+
+
+def _format_sprint_item(sp, db: Session):
+    sp_id = sp.get("id_sprint") if isinstance(sp, dict) else getattr(sp, "id_sprint", None)
+    id_proj = sp.get("id_proyecto") if isinstance(sp, dict) else getattr(sp, "id_proyecto", None)
+    sp_name = sp.get("nombre") if isinstance(sp, dict) else getattr(sp, "nombre", None)
+    sp_estado = sp.get("estado") if isinstance(sp, dict) else getattr(sp, "estado", None)
+    fi = sp.get("fecha_inicio") if isinstance(sp, dict) else getattr(sp, "fecha_inicio", None)
+    ff = sp.get("fecha_fin") if isinstance(sp, dict) else getattr(sp, "fecha_fin", None)
+    ffz = sp.get("fecha_finalizacion") if isinstance(sp, dict) else getattr(sp, "fecha_finalizacion", None)
+
+    sp_comprometidos, sp_completados, total_issues = _calculate_sprint_points(db, sp_id)
+
+    return {
+        "id_sprint": sp_id,
+        "id_proyecto": id_proj,
+        "nombre": sp_name,
+        "estado": sp_estado,
+        "fecha_inicio": _to_date_str(fi),
+        "fecha_fin": _to_date_str(ff),
+        "fecha_finalizacion": _to_date_str(ffz),
+        "sp_comprometidos": round(sp_comprometidos, 1),
+        "sp_completados": round(sp_completados, 1),
+        "total_issues": total_issues
+    }
+
 
 @router.get("/{proyecto_id}/sprints")
 async def get_project_sprints(
@@ -303,54 +360,56 @@ async def get_project_sprints(
         order=order
     )
     
-    # Calcular SP comprometidos y completados para cada sprint desde issues reales
-    done_statuses = {"done", "listo", "resuelto", "resolved", "cerrado", "closed", "finalizado", "completado"}
-    
+    return [_format_sprint_item(sp, db) for sp in sprints]
+
+
+def _determine_issue_done_date(issue, start_date, end_date, done_statuses):
+    done_date = None
+    if hasattr(issue, 'transiciones') and issue.transiciones:
+        for t in sorted(issue.transiciones, key=lambda x: x.fecha_cambio):
+            nuevo = (t.estado_nuevo or "").lower().strip()
+            if nuevo in done_statuses:
+                fecha_t = t.fecha_cambio.date() if t.fecha_cambio else None
+                if fecha_t and fecha_t <= end_date:
+                    done_date = max(fecha_t, start_date)
+                    break
+
+    if done_date is None and issue.resolved_at:
+        rd = issue.resolved_at.date()
+        if start_date <= rd <= end_date:
+            done_date = rd
+        elif rd > end_date:
+            done_date = end_date
+        else:
+            done_date = start_date
+
+    if done_date is None:
+        done_date = end_date
+
+    return done_date
+
+
+def _build_daily_burnup_series(start_date, days_in_sprint, alcance_total, ritmo_diario, completed_by_date, count_by_date):
+    from datetime import timedelta
     result = []
-    for sp in sprints:
-        sp_id = sp.get("id_sprint") if isinstance(sp, dict) else getattr(sp, "id_sprint", None)
-        id_proj = sp.get("id_proyecto") if isinstance(sp, dict) else getattr(sp, "id_proyecto", None)
-        sp_name = sp.get("nombre") if isinstance(sp, dict) else getattr(sp, "nombre", None)
-        sp_estado = sp.get("estado") if isinstance(sp, dict) else getattr(sp, "estado", None)
-        
-        fi = sp.get("fecha_inicio") if isinstance(sp, dict) else getattr(sp, "fecha_inicio", None)
-        ff = sp.get("fecha_fin") if isinstance(sp, dict) else getattr(sp, "fecha_fin", None)
-        ffz = sp.get("fecha_finalizacion") if isinstance(sp, dict) else getattr(sp, "fecha_finalizacion", None)
+    acumulado_completado = 0.0
 
-        fi_str = fi.isoformat() if hasattr(fi, 'isoformat') else (str(fi) if fi else None)
-        ff_str = ff.isoformat() if hasattr(ff, 'isoformat') else (str(ff) if ff else None)
-        ffz_str = ffz.isoformat() if hasattr(ffz, 'isoformat') else (str(ffz) if ffz else None)
+    for i in range(days_in_sprint + 1):
+        current_date = start_date + timedelta(days=i)
+        ritmo_ideal = min(ritmo_diario * i, alcance_total)
+        tareas_hoy = count_by_date.get(current_date, 0)
+        pts_hoy = completed_by_date.get(current_date, 0)
+        acumulado_completado += pts_hoy
 
-        # Obtener todos los issues asignados a este sprint
-        issues_in_sprint = db.query(models.Issue).filter(
-            models.Issue.id_sprint == sp_id
-        ).all() if sp_id else []
-        
-        sp_comprometidos = 0.0
-        sp_completados = 0.0
-        
-        for issue in issues_in_sprint:
-            pts = float(issue.story_points or 0.0)
-            sp_comprometidos += pts
-            
-            status = (issue.status_actual or "").lower().strip()
-            if status in done_statuses:
-                sp_completados += pts
-        
         result.append({
-            "id_sprint": sp_id,
-            "id_proyecto": id_proj,
-            "nombre": sp_name,
-            "estado": sp_estado,
-            "fecha_inicio": fi_str,
-            "fecha_fin": ff_str,
-            "fecha_finalizacion": ffz_str,
-            "sp_comprometidos": round(sp_comprometidos, 1),
-            "sp_completados": round(sp_completados, 1),
-            "total_issues": len(issues_in_sprint)
+            "fecha_real": current_date.strftime("%d %b"),
+            "alcance_total": round(alcance_total, 1),
+            "trabajo_completado": round(acumulado_completado, 1),
+            "ritmo_ideal": round(ritmo_ideal, 1),
+            "tareas_completadas": tareas_hoy
         })
-    
     return result
+
 
 @router.get("/{proyecto_id}/burnup")
 async def get_project_burnup(
@@ -365,14 +424,12 @@ async def get_project_burnup(
     user_id = deps.get_current_user_id(request)
     deps.check_user_exists(db, user_id)
     
-    # 1. Buscar sprint activo
     sprint = db.query(models.Sprint).filter(
         models.Sprint.id_proyecto == proyecto_id,
         models.Sprint.estado == 'active'
     ).first()
     
     if not sprint:
-        # Si no hay activo, tomar el último cerrado
         sprint = db.query(models.Sprint).filter(
             models.Sprint.id_proyecto == proyecto_id,
             models.Sprint.estado == 'closed'
@@ -381,30 +438,18 @@ async def get_project_burnup(
     if not sprint or not sprint.fecha_inicio or not sprint.fecha_fin:
         return []
 
-    # 2. Obtener issues del sprint
     issues = db.query(models.Issue).filter(models.Issue.id_sprint == sprint.id_sprint).all()
     if not issues:
         return []
         
-    # 3. Calcular alcance total
     alcance_total = sum(float(i.story_points or 0.0) for i in issues)
-    
-    # 4. Generar rango de fechas del sprint
-    from datetime import timedelta
     start_date = sprint.fecha_inicio.date()
     end_date = sprint.fecha_fin.date()
     
-    days_in_sprint = (end_date - start_date).days
-    if days_in_sprint <= 0:
-        days_in_sprint = 1
-        
-    # Ritmo ideal diario
+    days_in_sprint = max(1, (end_date - start_date).days)
     ritmo_diario = alcance_total / days_in_sprint
     
-    # 5. Mapear issues completados por fecha
     done_statuses = {"done", "listo", "resuelto", "resolved", "cerrado", "closed", "finalizado", "completado"}
-
-    # Agrupar puntos terminados por fecha
     completed_by_date = {}
     count_by_date = {}
 
@@ -414,68 +459,11 @@ async def get_project_burnup(
             continue
 
         pts = float(issue.story_points or 0.0)
-
-        # Intentar obtener la fecha real de finalización desde las transiciones
-        done_date = None
-        if hasattr(issue, 'transiciones') and issue.transiciones:
-            for t in sorted(issue.transiciones, key=lambda x: x.fecha_cambio):
-                nuevo = (t.estado_nuevo or "").lower().strip()
-                if nuevo in done_statuses:
-                    fecha_t = t.fecha_cambio.date() if t.fecha_cambio else None
-                    # Solo usar si cae dentro del sprint o antes
-                    if fecha_t and fecha_t <= end_date:
-                        done_date = max(fecha_t, start_date)  # No antes del inicio
-                        break
-
-        # Fallback 1: usar resolved_at si cae dentro del sprint
-        if done_date is None and issue.resolved_at:
-            rd = issue.resolved_at.date()
-            if start_date <= rd <= end_date:
-                done_date = rd
-            elif rd > end_date:
-                # Resuelta después del sprint → asignamos al último día del sprint
-                done_date = end_date
-            else:
-                # Resuelta antes del inicio → primer día del sprint
-                done_date = start_date
-
-        # Fallback 2: issue sin resolved_at pero en estado done → último día del sprint
-        if done_date is None:
-            done_date = end_date
-
+        done_date = _determine_issue_done_date(issue, start_date, end_date, done_statuses)
         completed_by_date[done_date] = completed_by_date.get(done_date, 0) + pts
         count_by_date[done_date] = count_by_date.get(done_date, 0) + 1
 
-    # 6. Construir resultado por día
-    result = []
-    acumulado_completado = 0.0
-
-    from datetime import date
-    today = date.today()
-
-    for i in range(days_in_sprint + 1):
-        current_date = start_date + timedelta(days=i)
-
-        # Ritmo ideal
-        ritmo_ideal = min(ritmo_diario * i, alcance_total)
-
-        # Tareas terminadas este día
-        tareas_hoy = count_by_date.get(current_date, 0)
-        pts_hoy = completed_by_date.get(current_date, 0)
-
-        # Acumular siempre (el sprint ya pasó, mostramos todo)
-        acumulado_completado += pts_hoy
-        trabajo = acumulado_completado
-
-        result.append({
-            "fecha_real": current_date.strftime("%d %b"),
-            "alcance_total": round(alcance_total, 1),
-            "trabajo_completado": round(trabajo, 1),
-            "ritmo_ideal": round(ritmo_ideal, 1),
-            "tareas_completadas": tareas_hoy
-        })
-
-    return result
+    return _build_daily_burnup_series(start_date, days_in_sprint, alcance_total, ritmo_diario, completed_by_date, count_by_date)
 
 
 @router.get("/{proyecto_id}/statuses")
@@ -504,7 +492,7 @@ async def get_project_unique_statuses(
     for s in transitions_statuses_prev:
         if s[0]: unique_statuses.add(s[0])
         
-    return sorted(list(unique_statuses))
+    return sorted(unique_statuses)
 
 @router.get("/{proyecto_id}/mappings")
 async def get_project_mappings(
@@ -622,8 +610,8 @@ async def get_project_percentiles(
             
     return results
 
-@router.get("/{proyecto_id}/burndown")
-@router.get("/{proyecto_id}/sprints/{sprint_id}/burndown")
+@router.get("/{proyecto_id}/burndown", responses={500: {"description": "Error interno del servidor"}})
+@router.get("/{proyecto_id}/sprints/{sprint_id}/burndown", responses={500: {"description": "Error interno del servidor"}})
 async def get_burndown_chart(
     proyecto_id: str,
     sprint_id: Optional[str] = None,
@@ -639,8 +627,8 @@ async def get_burndown_chart(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{proyecto_id}/cfd")
-@router.get("/{proyecto_id}/sprints/{sprint_id}/cfd")
+@router.get("/{proyecto_id}/cfd", responses={500: {"description": "Error interno del servidor"}})
+@router.get("/{proyecto_id}/sprints/{sprint_id}/cfd", responses={500: {"description": "Error interno del servidor"}})
 async def get_project_cfd(
     proyecto_id: str,
     sprint_id: Optional[str] = None,

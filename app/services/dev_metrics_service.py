@@ -2,6 +2,7 @@
 # Servicio analítico para el cálculo y consulta de métricas individuales por desarrollador
 # DATOS REALES: Todas las métricas se calculan desde la BD sincronizada con Jira
 
+from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, timezone, timedelta
@@ -10,17 +11,14 @@ from app.services.kpi import get_issue_cycle_time_days
 
 from app.services.jira_normalizer import normalize_status
 
+BADGE_FAST_DELIVERY = "Fast Delivery Hero"
+BADGE_COMMITMENT_MASTER = "Sprint Commitment Master"
+
 def get_base_status(status_name: str, db: Session = None, project_id: str = None) -> str:
     """Retorna la categoría base ('IN_PROGRESS', 'DONE', 'TODO') para un nombre de estado en Jira."""
     return normalize_status(status_name, db, project_id)
 
-def get_developer_scorecard_data(db: Session, proyecto_id: str, email_or_assignee_id: str = None):
-    """
-    Calcula las métricas del desarrollador desde datos REALES de Jira:
-    Cycle Time, WIP, Throughput, SP, Distribución de trabajo y Tareas asignadas.
-    """
-    # 1. Buscar los tickets del proyecto
-    all_issues = []
+def _fetch_filtered_dev_issues(db: Session, proyecto_id: str, email_or_assignee_id: Optional[str] = None):
     try:
         query = db.query(models.Issue)
         if proyecto_id and proyecto_id != "ALL":
@@ -30,34 +28,31 @@ def get_developer_scorecard_data(db: Session, proyecto_id: str, email_or_assigne
         print("Aviso: Error en get_developer_scorecard_data:", e)
         all_issues = []
 
-    # Filtro por usuario si se especifica email_or_assignee_id
-    if email_or_assignee_id:
-        target_str = email_or_assignee_id.lower().strip()
-        dev_issues = [
-            i for i in all_issues
-            if (i.assignee_email and i.assignee_email.lower().strip() == target_str)
-            or (i.assignee_id and i.assignee_id.lower().strip() == target_str)
-            or (i.assignee_name and target_str in i.assignee_name.lower().strip())
-        ]
-    else:
-        dev_issues = all_issues
+    if not email_or_assignee_id:
+        return all_issues
 
-    # 2. Calcular KPIs desde datos reales
+    target_str = email_or_assignee_id.lower().strip()
+    return [
+        i for i in all_issues
+        if (i.assignee_email and i.assignee_email.lower().strip() == target_str)
+        or (i.assignee_id and i.assignee_id.lower().strip() == target_str)
+        or (i.assignee_name and target_str in i.assignee_name.lower().strip())
+    ]
+
+
+def _aggregate_dev_issue_metrics(dev_issues, db: Session):
     cycle_times = []
     wip_count = 0
     completed_count = 0
     total_sp = 0.0
-
     stories_count = 0
     bugs_count = 0
     tasks_count = 0
-
     assigned_list = []
 
     for issue in dev_issues:
         base_status = get_base_status(issue.status_actual, db, issue.id_proyecto)
         ct_days = get_issue_cycle_time_days(issue)
-
         sp = float(issue.story_points or 0.0)
         itype = (issue.issue_type or "Story").lower()
 
@@ -65,7 +60,7 @@ def get_developer_scorecard_data(db: Session, proyecto_id: str, email_or_assigne
         try:
             if issue.sprint_activo and issue.sprint_activo.fecha_fin:
                 due_date = issue.sprint_activo.fecha_fin.isoformat()
-        except:
+        except Exception:
             pass
 
         if "bug" in itype:
@@ -100,29 +95,46 @@ def get_developer_scorecard_data(db: Session, proyecto_id: str, email_or_assigne
         })
 
     avg_ct = round(sum(cycle_times) / len(cycle_times), 1) if cycle_times else 0.0
+    return {
+        "cycle_times": cycle_times,
+        "avg_ct": avg_ct,
+        "wip_count": wip_count,
+        "completed_count": completed_count,
+        "total_sp": total_sp,
+        "stories_count": stories_count,
+        "bugs_count": bugs_count,
+        "tasks_count": tasks_count,
+        "assigned_list": assigned_list
+    }
 
-    # 3. Distribución de Trabajo (%)
+
+def _calculate_work_distribution(stories_count: int, bugs_count: int, tasks_count: int):
     tot_types = max(stories_count + bugs_count + tasks_count, 1)
     pct_stories = round((stories_count / tot_types) * 100)
     pct_bugs = round((bugs_count / tot_types) * 100)
-    pct_tasks = 100 - (pct_stories + pct_bugs)
-    if pct_tasks < 0:
-        pct_tasks = 0
+    pct_tasks = max(0, 100 - (pct_stories + pct_bugs))
+    return pct_stories, pct_bugs, pct_tasks
 
-    # 4. Calcular cycle_time del sprint anterior para comparación
+
+def get_developer_scorecard_data(db: Session, proyecto_id: str, email_or_assignee_id: str = None):
+    """
+    Calcula las métricas del desarrollador desde datos REALES de Jira:
+    Cycle Time, WIP, Throughput, SP, Distribución de trabajo y Tareas asignadas.
+    """
+    dev_issues = _fetch_filtered_dev_issues(db, proyecto_id, email_or_assignee_id)
+    aggr = _aggregate_dev_issue_metrics(dev_issues, db)
+
+    pct_stories, pct_bugs, pct_tasks = _calculate_work_distribution(
+        aggr["stories_count"], aggr["bugs_count"], aggr["tasks_count"]
+    )
+
     cycle_time_prev = _get_previous_sprint_cycle_time(db, proyecto_id, email_or_assignee_id)
-
-    # 5. Calcular throughput del sprint anterior
     throughput_last_sprint = _get_previous_sprint_throughput(db, proyecto_id, email_or_assignee_id)
-
-    # 6. Calcular SP target del sprint activo
     sp_target = _get_active_sprint_sp_target(db, proyecto_id)
 
-    # 7. Commitment rate: completados / total asignados
     total_assigned = len(dev_issues)
-    commitment_rate = round((completed_count / max(total_assigned, 1)) * 100, 1)
+    commitment_rate = round((aggr["completed_count"] / max(total_assigned, 1)) * 100, 1)
 
-    # 8. Bugs resueltos vs totales
     bugs_resueltos = sum(
         1 for i in dev_issues
         if "bug" in (i.issue_type or "").lower()
@@ -131,24 +143,24 @@ def get_developer_scorecard_data(db: Session, proyecto_id: str, email_or_assigne
 
     return {
         "proyecto_id": proyecto_id,
-        "cycle_time_personal": avg_ct,
+        "cycle_time_personal": aggr["avg_ct"],
         "cycle_time_prev": cycle_time_prev,
-        "wip_tickets": wip_count,
+        "wip_tickets": aggr["wip_count"],
         "wip_max": max(len(dev_issues), 1),
         "wip_avg": round(len(dev_issues) / 2, 1) if dev_issues else 0,
-        "throughput_tickets": completed_count,
-        "throughput_avg_daily": round(completed_count / max(_get_sprint_duration_days(db, proyecto_id), 1), 1),
+        "throughput_tickets": aggr["completed_count"],
+        "throughput_avg_daily": round(aggr["completed_count"] / max(_get_sprint_duration_days(db, proyecto_id), 1), 1),
         "throughput_last_sprint": throughput_last_sprint,
-        "story_points_burned": total_sp,
+        "story_points_burned": aggr["total_sp"],
         "story_points_target": sp_target,
-        "story_points_achieved_pct": round(min((total_sp / max(sp_target, 1.0)) * 100, 100)) if sp_target > 0 else 0,
+        "story_points_achieved_pct": round(min((aggr["total_sp"] / max(sp_target, 1.0)) * 100, 100)) if sp_target > 0 else 0,
         "kpis": {
-            "throughput_issues": completed_count,
-            "velocity_sp": total_sp,
-            "cycle_time_promedio_dias": avg_ct,
-            "wip_actual": wip_count,
+            "throughput_issues": aggr["completed_count"],
+            "velocity_sp": aggr["total_sp"],
+            "cycle_time_promedio_dias": aggr["avg_ct"],
+            "wip_actual": aggr["wip_count"],
             "commitment_rate_pct": commitment_rate,
-            "bugs_totales": bugs_count,
+            "bugs_totales": aggr["bugs_count"],
             "bugs_resueltos": bugs_resueltos
         },
         "work_distribution": {
@@ -156,7 +168,7 @@ def get_developer_scorecard_data(db: Session, proyecto_id: str, email_or_assigne
             "pct_bugs": pct_bugs,
             "pct_tareas": pct_tasks
         },
-        "assigned_issues": assigned_list
+        "assigned_issues": aggr["assigned_list"]
     }
 
 
@@ -250,7 +262,6 @@ def _get_sprint_duration_days(db: Session, proyecto_id: str) -> float:
         ).first()
 
         if active_sprint and active_sprint.fecha_inicio:
-            end = active_sprint.fecha_fin or datetime.now(timezone.utc)
             elapsed = (datetime.now(timezone.utc) - active_sprint.fecha_inicio).days
             return max(elapsed, 1)
         return 14  # Default sprint duration
@@ -395,7 +406,7 @@ def get_developer_alerts_data(db: Session, proyecto_id: str, email_or_assignee_i
         "alerts": alerts
     }
 
-def perform_alert_action(db: Session, issue_id: str, action_type: str):
+def perform_alert_action(_db: Session, issue_id: str, action_type: str):
     """Ejecuta una acción de desbloqueo (pedir ayuda, marcar bloqueado, descomponer tarea)."""
     if action_type == "request_help":
         msg = f"Solicitud de auxilio técnico enviada al Planificador para el ticket #{issue_id}."
@@ -531,21 +542,21 @@ def _calculate_dynamic_badges(db: Session, proyecto_id: str, email_or_assignee_i
         if ct > 0 and ct <= 2.5:
             badges.append({
                 "id": "fast-delivery",
-                "title": "Fast Delivery Hero",
+                "title": BADGE_FAST_DELIVERY,
                 "description": f"Cycle Time personal de {ct} días — por debajo del umbral de 2.5 días. ¡Excelente velocidad!",
                 "status": "UNLOCKED"
             })
         elif ct > 0:
             badges.append({
                 "id": "fast-delivery",
-                "title": "Fast Delivery Hero",
+                "title": BADGE_FAST_DELIVERY,
                 "description": f"Cycle Time actual: {ct}d. Necesitas bajar a ≤2.5d para desbloquear.",
                 "status": "LOCKED"
             })
         else:
             badges.append({
                 "id": "fast-delivery",
-                "title": "Fast Delivery Hero",
+                "title": BADGE_FAST_DELIVERY,
                 "description": "Completa tickets para calcular tu Cycle Time.",
                 "status": "LOCKED"
             })
@@ -554,21 +565,21 @@ def _calculate_dynamic_badges(db: Session, proyecto_id: str, email_or_assignee_i
         if commitment >= 80:
             badges.append({
                 "id": "sprint-master",
-                "title": "Sprint Commitment Master",
+                "title": BADGE_COMMITMENT_MASTER,
                 "description": f"Cumplimiento del {commitment}% del compromiso del sprint. ¡Excelente predictibilidad!",
                 "status": "UNLOCKED"
             })
         elif throughput > 0:
             badges.append({
                 "id": "sprint-master",
-                "title": "Sprint Commitment Master",
+                "title": BADGE_COMMITMENT_MASTER,
                 "description": f"Cumplimiento actual: {commitment}%. Necesitas ≥80% para desbloquear.",
                 "status": "LOCKED"
             })
         else:
             badges.append({
                 "id": "sprint-master",
-                "title": "Sprint Commitment Master",
+                "title": BADGE_COMMITMENT_MASTER,
                 "description": "Completa tareas en el sprint para calcular tu commitment rate.",
                 "status": "LOCKED"
             })

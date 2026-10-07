@@ -66,6 +66,6 @@ def send_email(
         logger.info(f"[EmailService] Correo enviado exitosamente a: {to_email}")
         return True
 
-    except Exception as e:
-        logger.error(f"[EmailService] Error enviando correo a {to_email}: {str(e)}")
+    except Exception:
+        logger.exception(f"[EmailService] Error enviando correo a {to_email}")
         return False

@@ -9,53 +9,54 @@ from app.core.security import JWT_ALGORITHM
 from app.models.audit import AuditLog
 
 class AuditMiddleware(BaseHTTPMiddleware):
+    def _extract_user_email(self, request: Request) -> str:
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return "Anónimo"
+        token = auth_header.split(" ")[1]
+        try:
+            payload = jwt.decode(token, SESSION_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            return payload.get("sub", "Anónimo")
+        except Exception:
+            return "Anónimo"
+
+    def _get_action_details(self, path: str, method: str) -> tuple[str, str]:
+        if "/auth/login" in path:
+            return "Inició sesión en la plataforma", "LOGIN"
+        if "/projects" in path and method == "GET":
+            return "Consultó el listado de proyectos y métricas", "USER"
+        if "/jira/sync" in path:
+            return "Ejecutó sincronización ETL de Jira", "SYSTEM"
+        if "/users" in path and method == "PUT":
+            return "Modificó configuración o rol de usuario", "SYSTEM"
+        return f"Ejecutó {method} en {path}", "SYSTEM"
+
+    def _save_audit_log(self, user_email: str, path: str, method: str, description: str, action_type: str) -> None:
+        db: Session = SessionLocal()
+        try:
+            log = AuditLog(
+                user_email=user_email,
+                action_path=path,
+                method=method,
+                description=description,
+                type=action_type
+            )
+            db.add(log)
+            db.commit()
+        except Exception:
+            pass
+        finally:
+            db.close()
+
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
 
         if response.status_code < 400 and request.method != "OPTIONS":
             path = request.url.path
-            if path.startswith("/api/v1") and "/users/" not in path: # Evitar loopear el propio log
-                user_email = "Anónimo"
-                
-                auth_header = request.headers.get("Authorization")
-                if auth_header and auth_header.startswith("Bearer "):
-                    token = auth_header.split(" ")[1]
-                    try:
-                        payload = jwt.decode(token, SESSION_SECRET_KEY, algorithms=[JWT_ALGORITHM])
-                        user_email = payload.get("sub", "Anónimo")
-                    except Exception:
-                        pass
-                
-                description = f"Ejecutó {request.method} en {path}"
-                action_type = "SYSTEM"
-                
-                if "/auth/login" in path:
-                    description = "Inició sesión en la plataforma"
-                    action_type = "LOGIN"
-                elif "/projects" in path and request.method == "GET":
-                    description = "Consultó el listado de proyectos y métricas"
-                    action_type = "USER"
-                elif "/jira/sync" in path:
-                    description = "Ejecutó sincronización ETL de Jira"
-                    action_type = "SYSTEM"
-                elif "/users" in path and request.method == "PUT":
-                    description = "Modificó configuración o rol de usuario"
-                    action_type = "SYSTEM"
-
-                db: Session = SessionLocal()
-                try:
-                    log = AuditLog(
-                        user_email=user_email,
-                        action_path=path,
-                        method=request.method,
-                        description=description,
-                        type=action_type
-                    )
-                    db.add(log)
-                    db.commit()
-                except Exception as e:
-                    pass
-                finally:
-                    db.close()
+            if path.startswith("/api/v1") and "/users/" not in path:
+                user_email = self._extract_user_email(request)
+                description, action_type = self._get_action_details(path, request.method)
+                self._save_audit_log(user_email, path, request.method, description, action_type)
 
         return response
+

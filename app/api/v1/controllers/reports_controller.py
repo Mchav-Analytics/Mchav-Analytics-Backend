@@ -16,7 +16,8 @@ router = APIRouter()
 @router.get(
     "/pdf",
     summary="Descargar reporte PDF de KPIs (HU-016)",
-    description="Genera y descarga un reporte ejecutivo en formato PDF con los KPIs consolidado por proyecto y equipo."
+    description="Genera y descarga un reporte ejecutivo en formato PDF con los KPIs consolidado por proyecto y equipo.",
+    responses={400: {"description": "Error al generar el reporte PDF"}}
 )
 async def download_pdf_report(
     request: Request,
@@ -67,7 +68,8 @@ from sqlalchemy import desc
 @router.get(
     "/historical",
     summary="Obtener reporte histórico inmutable",
-    description="Reconstruye las métricas usando el event sourcing de IssueHistory para una fecha específica."
+    description="Reconstruye las métricas usando el event sourcing de IssueHistory para una fecha específica.",
+    responses={400: {"description": "Error reconstruyendo historial"}}
 )
 async def get_historical_report(
     request: Request,
@@ -125,7 +127,8 @@ async def get_historical_report(
 
 @router.get(
     "/historical/range",
-    summary="Obtener reporte histórico inmutable por rango de fechas"
+    summary="Obtener reporte histórico inmutable por rango de fechas",
+    responses={400: {"description": "Error reconstruyendo historial por rango"}}
 )
 async def get_historical_report_range(
     request: Request,
@@ -141,12 +144,14 @@ async def get_historical_report_range(
         query = db.query(Issue).filter(Issue.id_proyecto == proyecto_id)
         if desarrollador_id:
             query = query.filter(Issue.assignee_id == desarrollador_id)
-        query = query.filter(Issue.resolved_at.isnot(None))
-        
-        if not all_time and start_date and end_date:
-            sd = datetime.strptime(start_date, "%Y-%m-%d").replace(hour=0, minute=0, second=0)
-            ed = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
-            query = query.filter(Issue.resolved_at >= sd, Issue.resolved_at <= ed)
+        if not all_time:
+            query = query.filter(Issue.resolved_at.isnot(None))
+            if start_date:
+                sd = datetime.strptime(start_date, "%Y-%m-%d").replace(hour=0, minute=0, second=0)
+                query = query.filter(Issue.resolved_at >= sd)
+            if end_date:
+                ed = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+                query = query.filter(Issue.resolved_at <= ed)
             
         issues = query.all()
         
@@ -154,7 +159,20 @@ async def get_historical_report_range(
         total_tickets = 0
         
         for issue in issues:
-            pts = float(issue.story_points) if issue.story_points is not None else 0.0
+            history_pts = db.query(IssueHistory).filter(
+                IssueHistory.id_jira == issue.id_jira,
+                IssueHistory.campo_modificado.in_(["story_points", "Story point estimate"])
+            ).order_by(desc(IssueHistory.fecha_cambio)).first()
+            
+            pts = 0.0
+            if history_pts and history_pts.valor_nuevo:
+                try:
+                    pts = float(history_pts.valor_nuevo)
+                except ValueError:
+                    pts = float(issue.story_points) if issue.story_points is not None else 0.0
+            elif issue.story_points is not None:
+                pts = float(issue.story_points)
+                
             total_puntos += pts
             total_tickets += 1
             
@@ -190,7 +208,8 @@ def run_dispatch_task(target_email: str = None):
 @router.post(
     "/send-monthly",
     summary="Despachar reportes mensuales por correo (Manual / Admin)",
-    description="Consolida las métricas del mes, genera los diagnósticos de Nubi AI y los reportes PDF, y los despacha por correo electrónico a administradores y líderes."
+    description="Consolida las métricas del mes, genera los diagnósticos de Nubi AI y los reportes PDF, y los despacha por correo electrónico a administradores y líderes.",
+    responses={500: {"description": "Error al iniciar el envío de reportes"}}
 )
 async def send_monthly_reports(
     background_tasks: BackgroundTasks,

@@ -5,13 +5,18 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Nume
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 
+FK_ISSUES_ID_JIRA = "issues.id_jira"
+FK_SPRINTS_ID_SPRINT = "sprints.id_sprint"
+FK_PROYECTOS_ID_PROYECTO = "proyectos.id_proyecto"
+CASCADE_ALL_DELETE_ORPHAN = "all, delete-orphan"
+
 # Tabla intermedia de asociación muchos-a-muchos (N:M) entre Issues y Sprints
 # Permite rastrear todos los sprints en los que ha participado un ticket a lo largo de su ciclo de vida
 issues_sprints = Table(
     "issues_sprints",
     Base.metadata,
-    Column("id_jira", String(50), ForeignKey("issues.id_jira", ondelete="CASCADE"), primary_key=True),
-    Column("id_sprint", String(50), ForeignKey("sprints.id_sprint", ondelete="CASCADE"), primary_key=True)
+    Column("id_jira", String(50), ForeignKey(FK_ISSUES_ID_JIRA, ondelete="CASCADE"), primary_key=True),
+    Column("id_sprint", String(50), ForeignKey(FK_SPRINTS_ID_SPRINT, ondelete="CASCADE"), primary_key=True)
 )
 
 class Proyecto(Base):
@@ -28,11 +33,11 @@ class Proyecto(Base):
     id_board = Column(Integer, nullable=True)               # ID del tablero principal asignado en Jira Agile
 
     # Relaciones ORM descendentes con cascada de eliminación
-    sprints = relationship("Sprint", back_populates="proyecto", cascade="all, delete-orphan")
-    issues = relationship("Issue", back_populates="proyecto", cascade="all, delete-orphan")
-    kpis = relationship("KpisHistoricos", back_populates="proyecto", cascade="all, delete-orphan")
-    mappings = relationship("MapeoEstado", cascade="all, delete-orphan")
-    usuarios_asignados = relationship("UserProject", back_populates="proyecto", cascade="all, delete-orphan")
+    sprints = relationship("Sprint", back_populates="proyecto", cascade=CASCADE_ALL_DELETE_ORPHAN)
+    issues = relationship("Issue", back_populates="proyecto", cascade=CASCADE_ALL_DELETE_ORPHAN)
+    kpis = relationship("KpisHistoricos", back_populates="proyecto", cascade=CASCADE_ALL_DELETE_ORPHAN)
+    mappings = relationship("MapeoEstado", cascade=CASCADE_ALL_DELETE_ORPHAN)
+    usuarios_asignados = relationship("UserProject", back_populates="proyecto", cascade=CASCADE_ALL_DELETE_ORPHAN)
 
 
 class Sprint(Base):
@@ -43,7 +48,7 @@ class Sprint(Base):
     __tablename__ = "sprints"
 
     id_sprint = Column(String(50), primary_key=True)        # ID numérico de Jira para el Sprint
-    id_proyecto = Column(String(50), ForeignKey("proyectos.id_proyecto", ondelete="CASCADE"), nullable=False)
+    id_proyecto = Column(String(50), ForeignKey(FK_PROYECTOS_ID_PROYECTO, ondelete="CASCADE"), nullable=False)
     nombre = Column(String(100), nullable=False)            # Nombre asignado al Sprint (ej: 'Sprint 1 - Backend')
     estado = Column(String(50), nullable=False)             # Estado del Sprint ('active', 'future', 'closed')
     fecha_inicio = Column(DateTime(timezone=True), nullable=True) # Fecha planificada de inicio
@@ -65,8 +70,8 @@ class Issue(Base):
 
     id_jira = Column(String(50), primary_key=True)          # ID numérico único asignado por Jira
     key_issue = Column(String(30), unique=True, nullable=False) # Clave alfanumérica del ticket (ej: 'MCHAV-42')
-    id_proyecto = Column(String(50), ForeignKey("proyectos.id_proyecto", ondelete="CASCADE"), nullable=False)
-    id_sprint = Column(String(50), ForeignKey("sprints.id_sprint", ondelete="SET NULL"), nullable=True) # Sprint actual
+    id_proyecto = Column(String(50), ForeignKey(FK_PROYECTOS_ID_PROYECTO, ondelete="CASCADE"), nullable=False)
+    id_sprint = Column(String(50), ForeignKey(FK_SPRINTS_ID_SPRINT, ondelete="SET NULL"), nullable=True) # Sprint actual
     summary = Column(Text, nullable=False)                  # Título o resumen principal de la tarea
     status_actual = Column(String(50), nullable=False)      # Estado en que se encuentra el ticket en Jira
     story_points = Column(Numeric(5, 2), default=0.00)     # Puntos de historia (Story Points) asignados
@@ -87,7 +92,7 @@ class Issue(Base):
     proyecto = relationship("Proyecto", back_populates="issues")
     sprint_activo = relationship("Sprint", back_populates="issues_activos")
     sprints = relationship("Sprint", secondary=issues_sprints, back_populates="issues")
-    transiciones = relationship("TransicionEstadoIssue", back_populates="issue", cascade="all, delete-orphan")
+    transiciones = relationship("TransicionEstadoIssue", back_populates="issue", cascade=CASCADE_ALL_DELETE_ORPHAN)
 
 class TransicionEstadoIssue(Base):
     """
@@ -98,7 +103,7 @@ class TransicionEstadoIssue(Base):
     __tablename__ = "transiciones_estado_issue"
 
     id_transicion = Column(Integer, primary_key=True, autoincrement=True) # Clave primaria autonumerada
-    id_jira = Column(String(50), ForeignKey("issues.id_jira", ondelete="CASCADE"), nullable=False)
+    id_jira = Column(String(50), ForeignKey(FK_ISSUES_ID_JIRA, ondelete="CASCADE"), nullable=False)
     estado_anterior = Column(String(50), nullable=True)     # Estado de origen de la transición (ej: 'To Do')
     estado_nuevo = Column(String(50), nullable=False)       # Estado de destino de la transición (ej: 'In Progress')
     fecha_cambio = Column(DateTime(timezone=True), nullable=False) # Estampa de tiempo exacta de la transición
@@ -115,7 +120,7 @@ class MapeoEstado(Base):
     __tablename__ = "mapeo_estados"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    id_proyecto = Column(String(50), ForeignKey("proyectos.id_proyecto", ondelete="CASCADE"), nullable=False)
+    id_proyecto = Column(String(50), ForeignKey(FK_PROYECTOS_ID_PROYECTO, ondelete="CASCADE"), nullable=False)
     estado_jira = Column(String(50), nullable=False)       # Nombre del estado tal cual viene de Jira
     estado_base = Column(String(20), nullable=False)       # Categoria base ('TODO', 'IN_PROGRESS', 'DONE')
 
@@ -127,8 +132,8 @@ class AuditoriaSprint(Base):
     __tablename__ = "auditoria_sprints"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    id_sprint = Column(String(50), ForeignKey("sprints.id_sprint", ondelete="CASCADE"), nullable=False, index=True)
-    id_jira = Column(String(50), ForeignKey("issues.id_jira", ondelete="CASCADE"), nullable=False)
+    id_sprint = Column(String(50), ForeignKey(FK_SPRINTS_ID_SPRINT, ondelete="CASCADE"), nullable=False, index=True)
+    id_jira = Column(String(50), ForeignKey(FK_ISSUES_ID_JIRA, ondelete="CASCADE"), nullable=False)
     accion = Column(String(20), nullable=False)            # 'ADDED' o 'REMOVED'
     fecha_evento = Column(DateTime(timezone=True), nullable=False)
     autor_nombre = Column(String(150), nullable=True)      # Quién originó el cambio

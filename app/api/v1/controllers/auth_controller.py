@@ -6,7 +6,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-from app.core.config import FRONTEND_URL
+from app.core.config import FRONTEND_URL, COOKIE_SECURE
 from app.core.database import get_db
 from app.core.security import sign_session_id, get_current_user, verify_password, encrypt_jira_token
 from app.repositories import user_repo
@@ -109,7 +109,8 @@ async def login_post(payload: MockLoginPayload, response: Response, db: Session 
     user = db.query(User).filter(User.email == payload.email).first()
     if not user:
         # Crea el usuario si no existe (para entorno dev)
-        target_role_name = "Administrador" if payload.role == "ADMIN" else ("Desarrollador" if payload.role == "DEVELOPER" else "Usuario")
+        role_map = {"ADMIN": "Administrador", "DEVELOPER": "Desarrollador"}
+        target_role_name = role_map.get(payload.role, "Usuario")
         rol = db.query(Role).filter(Role.nombre_rol == target_role_name).first()
         if not rol:
             rol = db.query(Role).filter(Role.nombre_rol == "Usuario").first()
@@ -125,7 +126,7 @@ async def login_post(payload: MockLoginPayload, response: Response, db: Session 
         key="session_id",
         value=signed_session,
         httponly=True,
-        secure=False,
+        secure=COOKIE_SECURE,
         samesite="lax",
         path="/"
     )
@@ -159,7 +160,8 @@ def login():
 @router.get(
     "/callback",
     summary="Callback de autenticación OAuth 2.0",
-    description="Endpoint de retorno configurado en Atlassian. Valida el estado CSRF, intercambia el código por el perfil del usuario y establece la sesión."
+    description="Endpoint de retorno configurado en Atlassian. Valida el estado CSRF, intercambia el código por el perfil del usuario y establece la sesión.",
+    responses={400: {"description": "Estado (State) inválido o expirado"}}
 )
 async def callback(code: str = None, state: str = None, error: str = None, response: Response = None, db: Session = Depends(get_db)):
     if error:
@@ -198,7 +200,7 @@ async def callback(code: str = None, state: str = None, error: str = None, respo
         key="session_id",
         value=signed_session,
         httponly=True,
-        secure=False,
+        secure=COOKIE_SECURE,
         samesite="lax",
         path="/"
     )
@@ -220,7 +222,8 @@ async def logout_user(response: Response):
 @router.post(
     "/token",
     summary="Iniciar sesión local (Bearer Token)",
-    description="Login local con usuario y contraseña para entorno de pruebas y Swagger UI."
+    description="Login local con usuario y contraseña para entorno de pruebas y Swagger UI.",
+    responses={401: {"description": "Usuario o contraseña incorrectos"}}
 )
 async def login_local(
     form_data: OAuth2PasswordRequestForm = Depends(),

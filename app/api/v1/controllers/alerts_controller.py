@@ -46,7 +46,7 @@ async def mark_alert_acknowledged(
     """
     try:
         return acknowledge_alert(db, alert_id)
-    except Exception as e:
+    except Exception:
         if db:
             db.rollback()
         return acknowledge_alert(None, alert_id)
@@ -63,7 +63,7 @@ async def list_help_requests(
     target_pid = resolve_project_id(db, proyecto_id)
     try:
         return get_help_requests(db, target_pid)
-    except Exception as e:
+    except Exception:
         if db:
             db.rollback()
         return get_help_requests(None, target_pid)
@@ -79,7 +79,7 @@ async def submit_help_request(
     """
     try:
         return create_help_request(db, payload)
-    except Exception as e:
+    except Exception:
         if db:
             db.rollback()
         return create_help_request(None, payload)
@@ -97,7 +97,7 @@ async def update_help_status(
     """
     try:
         return update_help_request_status(db, request_id, status, responded_by)
-    except Exception as e:
+    except Exception:
         if db:
             db.rollback()
         return update_help_request_status(None, request_id, status, responded_by)

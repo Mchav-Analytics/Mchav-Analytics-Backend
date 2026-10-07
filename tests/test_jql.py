@@ -1,9 +1,11 @@
 import asyncio
+import pytest
 from app.core.database import SessionLocal
 from app.services.jira_sync import get_jira_auth_credentials
 from app.models.auth import User
 from app.datasources.jira_datasource import JiraDatasource
 
+@pytest.mark.skip(reason="Manual integration test requiring active Jira OAuth credentials")
 async def test_jql():
     db = SessionLocal()
     # Get Valentina user
@@ -34,5 +36,5 @@ async def test_jql():
             print("Found issue assigned to:", assignee.get('emailAddress'), assignee.get('displayName'), assignee.get('accountId'))
         else:
             print("Unassigned issue")
-
-asyncio.run(test_jql())
+if __name__ == "__main__":
+    asyncio.run(test_jql())

@@ -66,8 +66,8 @@ def test_scheduled_monthly_reports_job_branches():
         scheduler.scheduled_monthly_reports_job()
         assert mock_db.close.called
 
-def test_scheduler_lifecycle():
-    scheduler._scheduler = None
+def test_scheduler_lifecycle(monkeypatch):
+    monkeypatch.setattr(scheduler, "_scheduler", None)
     with patch('app.core.scheduler.BackgroundScheduler') as mock_sched_cls:
         sched_inst = MagicMock()
         mock_sched_cls.return_value = sched_inst

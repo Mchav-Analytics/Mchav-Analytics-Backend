@@ -8,6 +8,24 @@ import app.models as models
 
 DEFAULT_PROJECT_ID = "10000"
 
+def _find_project_in_db(db: Session, cleaned: str) -> Optional[str]:
+    try:
+        if cleaned and cleaned.upper() != "PROJ-01":
+            p = db.query(models.Proyecto).filter(
+                (models.Proyecto.id_proyecto == cleaned) |
+                (models.Proyecto.key_proyecto == cleaned)
+            ).first()
+            if p:
+                return str(p.id_proyecto)
+
+        first_p = db.query(models.Proyecto).order_by(models.Proyecto.id_proyecto.asc()).first()
+        if first_p:
+            return str(first_p.id_proyecto)
+    except Exception:
+        pass
+    return None
+
+
 def resolve_project_id(db: Optional[Session], proyecto_id: Optional[str] = None) -> str:
     """
     Resuelve el ID de proyecto real en PostgreSQL:
@@ -18,30 +36,14 @@ def resolve_project_id(db: Optional[Session], proyecto_id: Optional[str] = None)
        Selecciona automáticamente el primer proyecto registrado y activo en la BD.
     4. Si no hay conexión o no hay proyectos en la BD, retorna '10000'.
     """
-    if not proyecto_id:
-        cleaned = ""
-    else:
-        cleaned = str(proyecto_id).strip()
+    cleaned = str(proyecto_id).strip() if proyecto_id else ""
 
     if cleaned.upper() == "ALL":
         return "ALL"
 
     if db:
-        try:
-            # Si no es PROJ-01, buscar coincidencia exacta por ID o Clave
-            if cleaned and cleaned.upper() != "PROJ-01":
-                p = db.query(models.Proyecto).filter(
-                    (models.Proyecto.id_proyecto == cleaned) |
-                    (models.Proyecto.key_proyecto == cleaned)
-                ).first()
-                if p:
-                    return str(p.id_proyecto)
-
-            # Si es PROJ-01, vacío o no encontrado, auto-seleccionar el primer proyecto real
-            first_p = db.query(models.Proyecto).order_by(models.Proyecto.id_proyecto.asc()).first()
-            if first_p:
-                return str(first_p.id_proyecto)
-        except Exception:
-            pass
+        db_resolved = _find_project_in_db(db, cleaned)
+        if db_resolved:
+            return db_resolved
 
     return cleaned if (cleaned and cleaned.upper() != "PROJ-01") else DEFAULT_PROJECT_ID

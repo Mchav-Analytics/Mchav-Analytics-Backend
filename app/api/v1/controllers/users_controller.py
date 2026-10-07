@@ -16,6 +16,9 @@ from app.models.jira import Proyecto
 
 router = APIRouter()
 
+MSG_USER_NOT_FOUND = "Usuario no encontrado"
+SCOPE_JIRA_READ = "jira:read"
+
 # Esquemas Pydantic para peticiones y respuestas
 class UserStatusPayload(BaseModel):
     activo: bool
@@ -38,10 +41,10 @@ class RoleResponse(BaseModel):
 
 class UserDetailResponse(BaseModel):
     id_usuario: int
-    email: Optional[str]
-    nombre: Optional[str]
-    id_rol: Optional[int]
-    rol: Optional[str]
+    email: Optional[str] = None
+    nombre: Optional[str] = None
+    id_rol: Optional[int] = None
+    rol: Optional[str] = None
     activo: bool
     proyectos_asignados: List[str]
 
@@ -76,7 +79,7 @@ def _verify_management_or_admin(user: User):
 @router.get("/", response_model=List[UserDetailResponse])
 async def list_users(
     db: Session = Depends(get_db),
-    current_user: User = Security(get_current_user, scopes=["jira:read"])
+    current_user: User = Security(get_current_user, scopes=[SCOPE_JIRA_READ])
 ):
     _verify_management_or_admin(current_user)
     users = db.query(User).all()
@@ -103,7 +106,7 @@ async def list_users(
 )
 async def list_roles(
     db: Session = Depends(get_db),
-    current_user: User = Security(get_current_user, scopes=["jira:read"])
+    current_user: User = Security(get_current_user, scopes=[SCOPE_JIRA_READ])
 ):
     roles = db.query(Role).all()
     return roles
@@ -111,7 +114,11 @@ async def list_roles(
 @router.put(
     "/{id_usuario}/status",
     summary="Activar o Desactivar usuario (HU-003 CA-01, CA-04)",
-    description="Permite habilitar o deshabilitar el acceso de un usuario. El administrador no puede desactivarse a sí mismo."
+    description="Permite habilitar o deshabilitar el acceso de un usuario. El administrador no puede desactivarse a sí mismo.",
+    responses={
+        400: {"description": "El administrador no puede desactivar su propia cuenta"},
+        404: {"description": MSG_USER_NOT_FOUND}
+    }
 )
 async def update_user_status(
     id_usuario: int,
@@ -130,7 +137,7 @@ async def update_user_status(
 
     target_user = db.query(User).filter(User.id_usuario == id_usuario).first()
     if not target_user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        raise HTTPException(status_code=404, detail=MSG_USER_NOT_FOUND)
 
     target_user.activo = payload.activo
     db.commit()
@@ -147,7 +154,11 @@ async def update_user_status(
 @router.put(
     "/{id_usuario}/role",
     summary="Asignar rol a usuario (HU-004 CA-01, CA-02)",
-    description="Actualiza el rol del usuario asignándole un único rol activo."
+    description="Actualiza el rol del usuario asignándole un único rol activo.",
+    responses={
+        400: {"description": "El rol especificado no existe"},
+        404: {"description": MSG_USER_NOT_FOUND}
+    }
 )
 async def update_user_role(
     id_usuario: int,
@@ -159,7 +170,7 @@ async def update_user_role(
 
     target_user = db.query(User).filter(User.id_usuario == id_usuario).first()
     if not target_user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        raise HTTPException(status_code=404, detail=MSG_USER_NOT_FOUND)
 
     role = None
     if payload.id_rol:
@@ -194,18 +205,19 @@ async def update_user_role(
 @router.get(
     "/{id_usuario}/projects",
     summary="Obtener proyectos vinculados a usuario (HU-005 CA-02)",
-    description="Retorna la lista de identificadores de proyectos de Jira asignados a un usuario."
+    description="Retorna la lista de identificadores de proyectos de Jira asignados a un usuario.",
+    responses={404: {"description": MSG_USER_NOT_FOUND}}
 )
 async def get_user_projects(
     id_usuario: int,
     db: Session = Depends(get_db),
-    current_user: User = Security(get_current_user, scopes=["jira:read"])
+    current_user: User = Security(get_current_user, scopes=[SCOPE_JIRA_READ])
 ):
     _verify_management_or_admin(current_user)
     
     target_user = db.query(User).filter(User.id_usuario == id_usuario).first()
     if not target_user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        raise HTTPException(status_code=404, detail=MSG_USER_NOT_FOUND)
 
     proj_ids = [p.id_proyecto for p in target_user.proyectos_asignados]
     return {"id_usuario": id_usuario, "proyectos": proj_ids}
@@ -213,7 +225,8 @@ async def get_user_projects(
 @router.post(
     "/{id_usuario}/projects",
     summary="Vincular proyectos a usuario (HU-005 CA-01, CA-03)",
-    description="Reemplaza la lista de proyectos vinculados al usuario."
+    description="Reemplaza la lista de proyectos vinculados al usuario.",
+    responses={404: {"description": MSG_USER_NOT_FOUND}}
 )
 async def assign_user_projects(
     id_usuario: int,
@@ -225,7 +238,7 @@ async def assign_user_projects(
 
     target_user = db.query(User).filter(User.id_usuario == id_usuario).first()
     if not target_user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        raise HTTPException(status_code=404, detail=MSG_USER_NOT_FOUND)
 
     # Eliminar asignaciones previas
     db.query(UserProject).filter(UserProject.id_usuario == id_usuario).delete()
@@ -252,7 +265,7 @@ async def assign_user_projects(
 
 class AuditLogResponse(BaseModel):
     id_log: int
-    user_email: Optional[str]
+    user_email: Optional[str] = None
     action_path: str
     method: str
     timestamp: datetime
@@ -278,7 +291,7 @@ def get_user_logs(
     # Primero buscamos el email del usuario
     target_user = db.query(User).filter(User.id_usuario == user_id).first()
     if not target_user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=MSG_USER_NOT_FOUND)
 
     # Buscamos los logs que coincidan con el email de ese usuario
     logs = db.query(AuditLog).filter((AuditLog.user_email == target_user.email) | (AuditLog.user_email == str(target_user.id_usuario))).order_by(desc(AuditLog.timestamp)).all()

@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
-from app.datasources.jira_datasource import JiraDatasource
+from app.datasources.jira_datasource import JiraDatasource, JiraIntegrationError
 from app.models.auth import User
 
 def test_obtener_credenciales_jira_desde_env():
@@ -36,7 +36,7 @@ def test_error_sin_credenciales_jira():
     user = User(cloud_id=None, access_token=None)
     
     with patch('os.getenv', return_value=""):
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(JiraIntegrationError) as exc_info:
             JiraDatasource.get_auth_credentials(mock_db, user)
         assert "No hay credenciales de Jira" in str(exc_info.value)
 
@@ -79,7 +79,7 @@ async def test_error_descargar_proyectos_servidor():
     mock_res = MagicMock(status_code=500, text="Internal Server Error")
     mock_client.get.return_value = mock_res
     
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(JiraIntegrationError) as exc_info:
         await JiraDatasource.fetch_projects(mock_client, "http://jira", {})
     assert "Error al obtener proyectos" in str(exc_info.value)
 

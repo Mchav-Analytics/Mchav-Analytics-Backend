@@ -8,6 +8,7 @@ import time
 import traceback
 import httpx
 import asyncio
+from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
@@ -16,6 +17,8 @@ from app.core.database import SessionLocal
 from app.services.kpi import calculate_and_save_kpis
 from app.repositories import user_repo, project_repo, sprint_repo, issue_repo, transition_repo, log_repo
 from app.datasources.jira_datasource import JiraDatasource
+
+UTC_OFFSET_STR = "+00:00"
 
 def get_jira_auth_credentials(db: Session, user: models.User) -> tuple[str, dict]:
     """Delegador que obtiene la URL base y encabezados de autorización llamando a JiraDatasource."""
@@ -51,7 +54,7 @@ async def refresh_user_token(db: Session, user: models.User, client: httpx.Async
         return new_access
     return None
 
-async def sync_projects(client: httpx.AsyncClient, base_jira_url: str, headers: dict, db: Session, user: models.User):
+async def sync_projects(client: httpx.AsyncClient, base_jira_url: str, headers: dict, db: Session, _user: models.User):
     """
     EXTRACCIÓN Y CARGA DE PROYECTOS:
     Consulta los proyectos visibles en Jira y actualiza la tabla 'proyectos' en la BD local.
@@ -80,6 +83,281 @@ async def sync_projects(client: httpx.AsyncClient, base_jira_url: str, headers: 
         
     return synced_projects
 
+async def _sync_project_boards_and_sprints(client: httpx.AsyncClient, base_agile_url: str, headers: dict, db: Session, project: models.Proyecto):
+    try:
+        boards_data = await JiraDatasource.fetch_boards_for_project(client, base_agile_url, headers, project.key_proyecto)
+        boards = boards_data.get("values", [])
+        
+        for b in boards:
+            b_id = b.get("id")
+            if not b_id:
+                continue
+                
+            loc = b.get("location", {}) or {}
+            loc_key = loc.get("projectKey")
+            if loc_key and loc_key.upper() != project.key_proyecto.upper():
+                print(f"[Sync] Omitiendo tablero {b_id} ({b.get('name')}) porque pertenece a {loc_key} y no a {project.key_proyecto}")
+                continue
+
+            sprints_data = await JiraDatasource.fetch_board_sprints(client, base_agile_url, headers, b_id)
+            for spr in sprints_data.get("values", []):
+                sprint_id_str = str(spr.get("id"))
+                nombre = spr.get("name")
+                estado = spr.get("state")
+                
+                f_inicio = spr.get("startDate")
+                f_fin = spr.get("endDate")
+                f_complete = spr.get("completeDate")
+                
+                dt_inicio = datetime.fromisoformat(f_inicio.replace("Z", UTC_OFFSET_STR)) if f_inicio else None
+                dt_fin = datetime.fromisoformat(f_fin.replace("Z", UTC_OFFSET_STR)) if f_fin else None
+                dt_complete = datetime.fromisoformat(f_complete.replace("Z", UTC_OFFSET_STR)) if f_complete else None
+                
+                existing_sprint = sprint_repo.get_by_id_sprint(db, sprint_id_str)
+                s_data = {
+                    "id_sprint": sprint_id_str,
+                    "id_proyecto": project.id_proyecto,
+                    "nombre": nombre,
+                    "estado": estado,
+                    "fecha_inicio": dt_inicio,
+                    "fecha_fin": dt_fin,
+                    "fecha_finalizacion": dt_complete
+                }
+                if not existing_sprint:
+                    sprint_repo.create(db, obj_in=s_data)
+                elif existing_sprint.id_proyecto == project.id_proyecto:
+                    sprint_repo.update(db, db_obj=existing_sprint, obj_in=s_data)
+    except Exception as e:
+        print(f"Advertencia obteniendo tableros y sprints para {project.key_proyecto}: {e}")
+
+
+def _extract_sprint_ids_from_field(sprint_field, project: models.Proyecto, db: Session) -> Optional[str]:
+    all_issue_sprints = []
+    if not sprint_field:
+        return None
+
+    sprint_list = sprint_field if isinstance(sprint_field, list) else [sprint_field]
+    for s_item in sprint_list:
+        s_id = None
+        s_name = None
+        s_state = "CLOSED"
+        if isinstance(s_item, dict):
+            s_id = str(s_item.get("id"))
+            s_name = s_item.get("name")
+            s_state = s_item.get("state", "CLOSED")
+        elif isinstance(s_item, str) and "id=" in s_item:
+            m_id = re.search(r'id=(\d+)', s_item)
+            if m_id:
+                s_id = m_id.group(1)
+            m_name = re.search(r'name=([^,]+)', s_item)
+            if m_name:
+                s_name = m_name.group(1)
+        
+        if s_id:
+            all_issue_sprints.append(s_id)
+            ex_sp = sprint_repo.get_by_id_sprint(db, s_id)
+            if not ex_sp:
+                try:
+                    sprint_repo.create(db, obj_in={
+                        "id_sprint": s_id,
+                        "id_proyecto": project.id_proyecto,
+                        "nombre": s_name or f"Sprint {s_id}",
+                        "estado": s_state
+                    })
+                except Exception:
+                    db.rollback()
+
+    return all_issue_sprints[-1] if all_issue_sprints else None
+
+
+def _extract_issue_fields(issue_data: dict, project: models.Proyecto, db: Session) -> dict:
+    issue_id = str(issue_data.get("id"))
+    issue_key = issue_data.get("key")
+    fields = issue_data.get("fields", {})
+    
+    summary = fields.get("summary")
+    status_obj = fields.get("status", {})
+    estado = status_obj.get("name")
+    
+    created_str = fields.get("created")
+    updated_str = fields.get("updated")
+    created_at = datetime.fromisoformat(created_str.replace("Z", UTC_OFFSET_STR)) if created_str else datetime.now(timezone.utc)
+    updated_at = datetime.fromisoformat(updated_str.replace("Z", UTC_OFFSET_STR)) if updated_str else datetime.now(timezone.utc)
+
+    sprint_field = fields.get("sprint") or fields.get("customfield_10020")
+    sprint_id = _extract_sprint_ids_from_field(sprint_field, project, db)
+
+    fecha_fin = updated_at if status_obj.get("statusCategory", {}).get("key") == "done" else None
+
+    assignee_obj = fields.get("assignee") or {}
+    assignee_id = assignee_obj.get("accountId") or "UNASSIGNED"
+    assignee_name = assignee_obj.get("displayName") or ("Sin Asignar" if assignee_id == "UNASSIGNED" else "Usuario Jira")
+    assignee_email = assignee_obj.get("emailAddress") or ""
+
+    itype_obj = fields.get("issuetype") or {}
+    issue_type = itype_obj.get("name", "Story")
+
+    priority_obj = fields.get("priority") or {}
+    priority = priority_obj.get("name", "Medium")
+
+    sp_val = fields.get("customfield_10028") or fields.get("customfield_10016") or fields.get("customfield_10026") or fields.get("storypoints") or fields.get("customfield_10020")
+    if isinstance(sp_val, (int, float)):
+        story_pts = float(sp_val)
+    elif isinstance(sp_val, str):
+        try:
+            story_pts = float(sp_val)
+        except ValueError:
+            story_pts = 0.0
+    else:
+        story_pts = 0.0
+
+    parent_obj = fields.get("parent") or {}
+    epic_field = fields.get("epic") or fields.get("customfield_10014") or {}
+    epic_key = None
+    epic_name = None
+    if isinstance(parent_obj, dict) and parent_obj.get("key"):
+        epic_key = parent_obj.get("key")
+        epic_name = parent_obj.get("fields", {}).get("summary") or parent_obj.get("summary")
+    elif isinstance(epic_field, dict):
+        epic_key = epic_field.get("key")
+        epic_name = epic_field.get("name") or epic_field.get("summary")
+    elif isinstance(epic_field, str):
+        epic_key = epic_field
+
+    comps_list = fields.get("components") or []
+    comp_names = [c.get("name") for c in comps_list if isinstance(c, dict) and c.get("name")]
+    components_str = ", ".join(comp_names) if comp_names else None
+
+    return {
+        "id_jira": issue_id,
+        "key_issue": issue_key,
+        "id_proyecto": project.id_proyecto,
+        "summary": summary or "",
+        "status_actual": estado or "Unknown",
+        "story_points": story_pts,
+        "created_at": created_at,
+        "resolved_at": fecha_fin,
+        "id_sprint": sprint_id,
+        "assignee_id": assignee_id,
+        "assignee_name": assignee_name,
+        "assignee_email": assignee_email,
+        "issue_type": issue_type,
+        "priority": priority,
+        "epic_key": epic_key,
+        "epic_name": epic_name,
+        "components": components_str
+    }
+
+
+def _handle_sprint_audit(db: Session, db_issue, item: dict, t_date: datetime, author_name: str, author_email: str):
+    from app.models.jira import AuditoriaSprint
+    from_ids_raw = item.get("from") or ""
+    to_ids_raw = item.get("to") or ""
+    
+    from_ids = [s.strip() for s in str(from_ids_raw).split(",") if s.strip()]
+    to_ids = [s.strip() for s in str(to_ids_raw).split(",") if s.strip()]
+    
+    removed_from = set(from_ids) - set(to_ids)
+    for s_id in removed_from:
+        existing_aud = db.query(AuditoriaSprint).filter(
+            AuditoriaSprint.id_sprint == s_id,
+            AuditoriaSprint.id_jira == db_issue.id_jira,
+            AuditoriaSprint.accion == "REMOVED",
+            AuditoriaSprint.fecha_evento == t_date
+        ).first()
+        if not existing_aud:
+            db.add(AuditoriaSprint(
+                id_sprint=s_id,
+                id_jira=db_issue.id_jira,
+                accion="REMOVED",
+                fecha_evento=t_date,
+                autor_nombre=author_name,
+                autor_email=author_email
+            ))
+
+    added_to = set(to_ids) - set(from_ids)
+    for s_id in added_to:
+        existing_aud = db.query(AuditoriaSprint).filter(
+            AuditoriaSprint.id_sprint == s_id,
+            AuditoriaSprint.id_jira == db_issue.id_jira,
+            AuditoriaSprint.accion == "ADDED",
+            AuditoriaSprint.fecha_evento == t_date
+        ).first()
+        if not existing_aud:
+            db.add(AuditoriaSprint(
+                id_sprint=s_id,
+                id_jira=db_issue.id_jira,
+                accion="ADDED",
+                fecha_evento=t_date,
+                autor_nombre=author_name,
+                autor_email=author_email
+            ))
+    db.commit()
+
+
+def _handle_status_transition(db: Session, db_issue, item: dict, t_date: datetime):
+    from_status = item.get("fromString")
+    to_status = item.get("toString")
+    existing_trans = transition_repo.get_existing(db, db_issue.id_jira, t_date, from_status, to_status)
+    if not existing_trans:
+        transition_repo.create(db, obj_in={
+            "id_jira": db_issue.id_jira,
+            "estado_anterior": from_status,
+            "estado_nuevo": to_status,
+            "fecha_cambio": t_date
+        })
+
+
+def _handle_issue_history(db: Session, db_issue, item: dict, t_date: datetime, field_name: str):
+    if field_name not in ["status", "story_points", "Story point estimate", "assignee", "priority", "Sprint"]:
+        return
+    from_str = item.get("fromString")
+    to_str = item.get("toString")
+    from app.models.issue_history import IssueHistory
+    existing = db.query(IssueHistory).filter(
+        IssueHistory.id_jira == db_issue.id_jira,
+        IssueHistory.fecha_cambio == t_date,
+        IssueHistory.campo_modificado == field_name
+    ).first()
+    if not existing:
+        new_history = IssueHistory(
+            id_jira=db_issue.id_jira,
+            campo_modificado=field_name,
+            valor_anterior=from_str,
+            valor_nuevo=to_str,
+            fecha_cambio=t_date
+        )
+        db.add(new_history)
+        db.commit()
+
+
+async def _sync_issue_changelog(client: httpx.AsyncClient, base_jira_url: str, headers: dict, db: Session, db_issue, issue_data: dict, issue_key: str):
+    try:
+        changelog_data = issue_data.get("changelog", {}) or {}
+        histories = changelog_data.get("histories") or changelog_data.get("values")
+        if histories is None:
+            changelog = await JiraDatasource.fetch_issue_changelog(client, base_jira_url, headers, issue_key)
+            histories = changelog.get("values", [])
+        
+        for history in histories:
+            created_t = history.get("created")
+            t_date = datetime.fromisoformat(created_t.replace("Z", UTC_OFFSET_STR)) if created_t else datetime.now(timezone.utc)
+            author_obj = history.get("author") or {}
+            author_name = author_obj.get("displayName") or "Unknown"
+            author_email = author_obj.get("emailAddress") or ""
+            
+            for item in history.get("items", []):
+                field_name = item.get("field")
+                if field_name == "Sprint":
+                    _handle_sprint_audit(db, db_issue, item, t_date, author_name, author_email)
+                elif field_name == "status":
+                    _handle_status_transition(db, db_issue, item, t_date)
+                
+                _handle_issue_history(db, db_issue, item, t_date, field_name)
+    except Exception as e:
+        print(f"Error procesando historial para {issue_key}: {e}")
+
+
 async def sync_issues_for_project(
     client: httpx.AsyncClient, 
     base_jira_url: str, 
@@ -99,58 +377,10 @@ async def sync_issues_for_project(
     start_at = 0
     max_results = 100
     total_processed = 0
-    
-    # 1. Obtener tableros y sprints del proyecto
-    try:
-        boards_data = await JiraDatasource.fetch_boards_for_project(client, base_agile_url, headers, project.key_proyecto)
-        boards = boards_data.get("values", [])
-        
-        for b in boards:
-            b_id = b.get("id")
-            if not b_id:
-                continue
-                
-            # Validar pertenencia del tablero
-            loc = b.get("location", {}) or {}
-            loc_key = loc.get("projectKey")
-            if loc_key and loc_key.upper() != project.key_proyecto.upper():
-                print(f"[Sync] Omitiendo tablero {b_id} ({b.get('name')}) porque pertenece a {loc_key} y no a {project.key_proyecto}")
-                continue
 
-            sprints_data = await JiraDatasource.fetch_board_sprints(client, base_agile_url, headers, b_id)
-            for spr in sprints_data.get("values", []):
-                sprint_id_str = str(spr.get("id"))
-                nombre = spr.get("name")
-                estado = spr.get("state")
-                
-                f_inicio = spr.get("startDate")
-                f_fin = spr.get("endDate")
-                f_complete = spr.get("completeDate")
-                
-                dt_inicio = datetime.fromisoformat(f_inicio.replace("Z", "+00:00")) if f_inicio else None
-                dt_fin = datetime.fromisoformat(f_fin.replace("Z", "+00:00")) if f_fin else None
-                dt_complete = datetime.fromisoformat(f_complete.replace("Z", "+00:00")) if f_complete else None
-                
-                existing_sprint = sprint_repo.get_by_id_sprint(db, sprint_id_str)
-                s_data = {
-                    "id_sprint": sprint_id_str,
-                    "id_proyecto": project.id_proyecto,
-                    "nombre": nombre,
-                    "estado": estado,
-                    "fecha_inicio": dt_inicio,
-                    "fecha_fin": dt_fin,
-                    "fecha_finalizacion": dt_complete
-                }
-                if not existing_sprint:
-                    sprint_repo.create(db, obj_in=s_data)
-                elif existing_sprint.id_proyecto == project.id_proyecto:
-                    sprint_repo.update(db, db_obj=existing_sprint, obj_in=s_data)
-    except Exception as e:
-        print(f"Advertencia obteniendo tableros y sprints para {project.key_proyecto}: {e}")
+    await _sync_project_boards_and_sprints(client, base_agile_url, headers, db, project)
 
     next_page_token = None
-    
-    # 2. Descargar tickets via JQL y cargarlos en BD
     while True:
         data = await JiraDatasource.fetch_issues_jql(
             client, base_jira_url, headers, jql, start_at=start_at, max_results=max_results, next_page_token=next_page_token
@@ -161,254 +391,47 @@ async def sync_issues_for_project(
             break
             
         for issue_data in issues:
-            issue_id = str(issue_data.get("id"))
             issue_key = issue_data.get("key")
-            fields = issue_data.get("fields", {})
+            i_data = _extract_issue_fields(issue_data, project, db)
             
-            summary = fields.get("summary")
-            status_obj = fields.get("status", {})
-            estado = status_obj.get("name")
-            
-            created_str = fields.get("created")
-            updated_str = fields.get("updated")
-            
-            created_at = datetime.fromisoformat(created_str.replace("Z", "+00:00")) if created_str else datetime.now(timezone.utc)
-            updated_at = datetime.fromisoformat(updated_str.replace("Z", "+00:00")) if updated_str else datetime.now(timezone.utc)
-            
-            # Extraer Sprint(s) asignados al ticket
-            all_issue_sprints = []
-            sprint_field = fields.get("sprint") or fields.get("customfield_10020")
-            if sprint_field:
-                sprint_list = sprint_field if isinstance(sprint_field, list) else [sprint_field]
-                for s_item in sprint_list:
-                    s_id = None
-                    s_name = None
-                    s_state = "CLOSED"
-                    if isinstance(s_item, dict):
-                        s_id = str(s_item.get("id"))
-                        s_name = s_item.get("name")
-                        s_state = s_item.get("state", "CLOSED")
-                    elif isinstance(s_item, str) and "id=" in s_item:
-                        m_id = re.search(r'id=(\d+)', s_item)
-                        if m_id:
-                            s_id = m_id.group(1)
-                        m_name = re.search(r'name=([^,]+)', s_item)
-                        if m_name:
-                            s_name = m_name.group(1)
-                    
-                    if s_id:
-                        all_issue_sprints.append(s_id)
-                        ex_sp = sprint_repo.get_by_id_sprint(db, s_id)
-                        if not ex_sp:
-                            try:
-                                sprint_repo.create(db, obj_in={
-                                    "id_sprint": s_id,
-                                    "id_proyecto": project.id_proyecto,
-                                    "nombre": s_name or f"Sprint {s_id}",
-                                    "estado": s_state
-                                })
-                            except Exception as sp_err:
-                                db.rollback()
-
-            sprint_id = all_issue_sprints[-1] if all_issue_sprints else None
-
-            fecha_fin = None
-            if status_obj.get("statusCategory", {}).get("key") == "done":
-                fecha_fin = updated_at
-
-            # Extraer campos de asignación, tipo, prioridad y Story Points
-            assignee_obj = fields.get("assignee") or {}
-            assignee_id = assignee_obj.get("accountId") or "UNASSIGNED"
-            assignee_name = assignee_obj.get("displayName") or ("Sin Asignar" if assignee_id == "UNASSIGNED" else "Usuario Jira")
-            assignee_email = assignee_obj.get("emailAddress") or ""
-
-            itype_obj = fields.get("issuetype") or {}
-            issue_type = itype_obj.get("name", "Story")
-
-            priority_obj = fields.get("priority") or {}
-            priority = priority_obj.get("name", "Medium")
-
-            sp_val = fields.get("customfield_10028") or fields.get("customfield_10016") or fields.get("customfield_10026") or fields.get("storypoints") or fields.get("customfield_10020")
-            if isinstance(sp_val, (int, float)):
-                story_pts = float(sp_val)
-            elif isinstance(sp_val, str):
-                try:
-                    story_pts = float(sp_val)
-                except ValueError:
-                    story_pts = 0.0
-            else:
-                story_pts = 0.0
-
-            # Extraer Épica contenedora
-            parent_obj = fields.get("parent") or {}
-            epic_field = fields.get("epic") or fields.get("customfield_10014") or {}
-            epic_key = None
-            epic_name = None
-            if isinstance(parent_obj, dict) and parent_obj.get("key"):
-                epic_key = parent_obj.get("key")
-                epic_name = parent_obj.get("fields", {}).get("summary") or parent_obj.get("summary")
-            elif isinstance(epic_field, dict):
-                epic_key = epic_field.get("key")
-                epic_name = epic_field.get("name") or epic_field.get("summary")
-            elif isinstance(epic_field, str):
-                epic_key = epic_field
-
-            # Extraer Componentes
-            comps_list = fields.get("components") or []
-            comp_names = [c.get("name") for c in comps_list if isinstance(c, dict) and c.get("name")]
-            components_str = ", ".join(comp_names) if comp_names else None
-
             db_issue = issue_repo.get_by_key(db, issue_key)
-            i_data = {
-                "id_jira": issue_id,
-                "key_issue": issue_key,
-                "id_proyecto": project.id_proyecto,
-                "summary": summary or "",
-                "status_actual": estado or "Unknown",
-                "story_points": story_pts,
-                "created_at": created_at,
-                "resolved_at": fecha_fin,
-                "id_sprint": sprint_id,
-                "assignee_id": assignee_id,
-                "assignee_name": assignee_name,
-                "assignee_email": assignee_email,
-                "issue_type": issue_type,
-                "priority": priority,
-                "epic_key": epic_key,
-                "epic_name": epic_name,
-                "components": components_str
-            }
-            
             if not db_issue:
                 db_issue = issue_repo.create(db, obj_in=i_data)
             else:
                 db_issue = issue_repo.update(db, db_obj=db_issue, obj_in=i_data)
                 
-            # Extraer e insertar el historial de cambios de estado (changelog)
-            try:
-                changelog_data = issue_data.get("changelog", {}) or {}
-                histories = changelog_data.get("histories") or changelog_data.get("values")
-                if histories is None:
-                    changelog = await JiraDatasource.fetch_issue_changelog(client, base_jira_url, headers, issue_key)
-                    histories = changelog.get("values", [])
-                
-                for history in histories:
-                    created_t = history.get("created")
-                    t_date = datetime.fromisoformat(created_t.replace("Z", "+00:00")) if created_t else datetime.now(timezone.utc)
-                    
-                    author_obj = history.get("author") or {}
-                    author_name = author_obj.get("displayName") or "Unknown"
-                    author_email = author_obj.get("emailAddress") or ""
-                    
-                    for item in history.get("items", []):
-                        field_name = item.get("field")
-                        
-                        # --- NUEVA LÓGICA DE AUDITORÍA DE SCOPE CREEP ---
-                        if field_name == "Sprint":
-                            from_ids_raw = item.get("from") or ""
-                            to_ids_raw = item.get("to") or ""
-                            
-                            from_ids = [s.strip() for s in str(from_ids_raw).split(",") if s.strip()]
-                            to_ids = [s.strip() for s in str(to_ids_raw).split(",") if s.strip()]
-                            
-                            # Sprints de los que salió (REMOVED)
-                            removed_from = set(from_ids) - set(to_ids)
-                            for s_id in removed_from:
-                                from app.models.jira import AuditoriaSprint
-                                existing_aud = db.query(AuditoriaSprint).filter(
-                                    AuditoriaSprint.id_sprint == s_id,
-                                    AuditoriaSprint.id_jira == db_issue.id_jira,
-                                    AuditoriaSprint.accion == "REMOVED",
-                                    AuditoriaSprint.fecha_evento == t_date
-                                ).first()
-                                if not existing_aud:
-                                    aud_rem = AuditoriaSprint(
-                                        id_sprint=s_id,
-                                        id_jira=db_issue.id_jira,
-                                        accion="REMOVED",
-                                        fecha_evento=t_date,
-                                        autor_nombre=author_name,
-                                        autor_email=author_email
-                                    )
-                                    db.add(aud_rem)
-
-                            # Sprints a los que entró (ADDED)
-                            added_to = set(to_ids) - set(from_ids)
-                            for s_id in added_to:
-                                from app.models.jira import AuditoriaSprint
-                                existing_aud = db.query(AuditoriaSprint).filter(
-                                    AuditoriaSprint.id_sprint == s_id,
-                                    AuditoriaSprint.id_jira == db_issue.id_jira,
-                                    AuditoriaSprint.accion == "ADDED",
-                                    AuditoriaSprint.fecha_evento == t_date
-                                ).first()
-                                if not existing_aud:
-                                    aud_add = AuditoriaSprint(
-                                        id_sprint=s_id,
-                                        id_jira=db_issue.id_jira,
-                                        accion="ADDED",
-                                        fecha_evento=t_date,
-                                        autor_nombre=author_name,
-                                        autor_email=author_email
-                                    )
-                                    db.add(aud_add)
-                                    
-                            db.commit()
-                        # ------------------------------------------------
-                        
-                        if field_name == "status":
-                            from_status = item.get("fromString")
-                            to_status = item.get("toString")
-                            
-                            existing_trans = transition_repo.get_existing(db, db_issue.id_jira, t_date, from_status, to_status)
-                            if not existing_trans:
-                                transition_repo.create(db, obj_in={
-                                    "id_jira": db_issue.id_jira,
-                                    "estado_anterior": from_status,
-                                    "estado_nuevo": to_status,
-                                    "fecha_cambio": t_date
-                                })
-                        
-                        # GUARDAR EN EL HISTORIAL INMUTABLE (Event Sourcing)
-                        if field_name in ["status", "story_points", "Story point estimate", "assignee", "priority", "Sprint"]:
-                            from_str = item.get("fromString")
-                            to_str = item.get("toString")
-                            
-                            from app.models.issue_history import IssueHistory
-                            existing = db.query(IssueHistory).filter(
-                                IssueHistory.id_jira == db_issue.id_jira,
-                                IssueHistory.fecha_cambio == t_date,
-                                IssueHistory.campo_modificado == field_name
-                            ).first()
-                            
-                            if not existing:
-                                new_history = IssueHistory(
-                                    id_jira=db_issue.id_jira,
-                                    campo_modificado=field_name,
-                                    valor_anterior=from_str,
-                                    valor_nuevo=to_str,
-                                    fecha_cambio=t_date
-                                )
-                                db.add(new_history)
-                                db.commit()
-            except Exception as e:
-                print(f"Error procesando historial para {issue_key}: {e}")
-
+            await _sync_issue_changelog(client, base_jira_url, headers, db, db_issue, issue_data, issue_key)
             total_processed += 1
 
         next_page_token = data.get("nextPageToken")
         is_last = data.get("isLast", False)
         
-        # Si la API v3 retorna isLast o ya no hay nextPageToken, terminamos
         if is_last or not next_page_token:
-            # Fallback legacy si la API anterior respondía con "total" (no es el caso de search/jql, pero por seguridad)
             start_at += max_results
             total = data.get("total", 0)
-            if not next_page_token and total > 0 and start_at >= total:
+            if not next_page_token or (total > 0 and start_at >= total):
                 break
-            elif not next_page_token:
-                break
+
     return total_processed
+
+def _resolve_sync_user(db: Session, user_id):
+    if isinstance(user_id, models.User):
+        return user_id
+    return user_repo.get(db, user_id)
+
+
+async def _sync_projects_with_retry(client: httpx.AsyncClient, base_jira_url: str, headers: dict, db: Session, user: models.User):
+    try:
+        return await sync_projects(client, base_jira_url, headers, db, user)
+    except Exception as e:
+        if "401" in str(e) or "unauthorized" in str(e).lower():
+            print(f"[Sync] Token expirado para usuario {user.id_usuario}, intentando refrescar...")
+            new_token = await refresh_user_token(db, user, client)
+            if new_token:
+                base_jira_url, headers = get_jira_auth_credentials(db, user)
+                return await sync_projects(client, base_jira_url, headers, db, user)
+        raise e
+
 
 async def async_run_jira_sync(user_id: int, tipo_sincronizacion: str = "MANUAL"):
     """
@@ -420,17 +443,12 @@ async def async_run_jira_sync(user_id: int, tipo_sincronizacion: str = "MANUAL")
     total_issues = 0
 
     try:
-        if isinstance(user_id, models.User):
-            user = user_id
-            user_id = user.id_usuario
-        else:
-            user = user_repo.get(db, user_id)
-
+        user = _resolve_sync_user(db, user_id)
         if not user:
             print(f"[Sync Error] Usuario {user_id} no encontrado en base de datos.")
             return
 
-        ejecutado_por = user.nombre or user.email or f"Usuario {user_id}"
+        ejecutado_por = user.nombre or user.email or f"Usuario {user.id_usuario}"
         log_entry = log_repo.create(db, obj_in={
             "fecha_ejecucion": datetime.now(timezone.utc),
             "tipo_sincronizacion": tipo_sincronizacion,
@@ -444,20 +462,7 @@ async def async_run_jira_sync(user_id: int, tipo_sincronizacion: str = "MANUAL")
         base_agile_url = base_jira_url.replace("/rest/api/3", "/rest/agile/1.0")
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            try:
-                projects = await sync_projects(client, base_jira_url, headers, db, user)
-            except Exception as e:
-                if "401" in str(e) or "unauthorized" in str(e).lower():
-                    print(f"[Sync] Token expirado para usuario {user.id_usuario}, intentando refrescar...")
-                    new_token = await refresh_user_token(db, user, client)
-                    if new_token:
-                        base_jira_url, headers = get_jira_auth_credentials(db, user)
-                        projects = await sync_projects(client, base_jira_url, headers, db, user)
-                    else:
-                        raise e
-                else:
-                    raise e
-            
+            projects = await _sync_projects_with_retry(client, base_jira_url, headers, db, user)
             for project in projects:
                 count = await sync_issues_for_project(client, base_jira_url, base_agile_url, headers, db, project)
                 total_issues += count
@@ -519,6 +524,6 @@ def run_jira_sync_task(user_id: int, tipo_sincronizacion: str = "MANUAL"):
         print("[run_jira_sync_task] Executing via direct asyncio.run()...")
         return asyncio.run(async_run_jira_sync(user_id, tipo_sincronizacion))
 
-async def run_jira_sync(user_id: int, db: Session, tipo_sincronizacion: str = "MANUAL"):
+async def run_jira_sync(user_id: int, _db: Session = None, tipo_sincronizacion: str = "MANUAL"):
     """Wrapper asíncrono para ejecutar la sincronización directamente."""
     await async_run_jira_sync(user_id, tipo_sincronizacion)

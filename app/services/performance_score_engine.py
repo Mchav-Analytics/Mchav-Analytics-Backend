@@ -8,6 +8,12 @@ import app.models as models
 from app.services.dev_metrics_service import get_developer_scorecard_data
 from app.services.project_resolver import resolve_project_id
 
+def _calculate_ratio(done_val: float, team_avg: float) -> float:
+    if team_avg > 0:
+        return done_val / max(team_avg, 1.0)
+    return 1.0 if done_val > 0 else 0.5
+
+
 def calculate_performance_score(
     tickets_done: int,
     team_avg_tickets: float,
@@ -28,11 +34,11 @@ def calculate_performance_score(
     - Calidad / Clean Code (15%)
     """
     # 1. Throughput Score (25%)
-    ratio_tp = (tickets_done / max(team_avg_tickets, 1.0)) if team_avg_tickets > 0 else (1.0 if tickets_done > 0 else 0.5)
+    ratio_tp = _calculate_ratio(tickets_done, team_avg_tickets)
     s_tp = min(ratio_tp * 75.0, 100.0)
 
     # 2. Velocity Score (20%)
-    ratio_sp = (sp_done / max(team_avg_sp, 1.0)) if team_avg_sp > 0 else (1.0 if sp_done > 0 else 0.5)
+    ratio_sp = _calculate_ratio(sp_done, team_avg_sp)
     s_sp = min(ratio_sp * 75.0, 100.0)
 
     # 3. Cycle Time Score (20%) — Menor cycle time respecto al promedio = Mayor puntaje
@@ -114,20 +120,18 @@ def determine_quadrant(
             "color": "rose"
         }
 
-def calculate_team_performance_matrix(
-    db: Session,
-    proyecto_id: str = "PROJ-01",
-    sprint_id: Optional[str] = None
-) -> Dict[str, Any]:
-    """
-    Genera la Matriz Comparativa de Equipo completa (Fase 6):
-    - Calcula métricas desglosadas por desarrollador
-    - Determina el Performance Score (0-100 pts)
-    - Asigna el cuadrante operativo
-    - Genera ranking con posiciones y explicaciones claras ("El porqué de las cosas")
-    """
-    proyecto_id = resolve_project_id(db, proyecto_id)
-    # 1. Obtener desarrolladores únicos del proyecto
+def _extract_sc_kpi(sc_dict, field_name, default_val):
+    if not isinstance(sc_dict, dict):
+        return default_val
+    kpis_obj = sc_dict.get("kpis")
+    if isinstance(kpis_obj, dict) and field_name in kpis_obj:
+        return kpis_obj[field_name]
+    if field_name in sc_dict:
+        return sc_dict[field_name]
+    return default_val
+
+
+def _fetch_unique_dev_users(db: Session, proyecto_id: str) -> List[Dict[str, str]]:
     dev_users = []
     try:
         query = db.query(models.Issue.assignee_id, models.Issue.assignee_name, models.Issue.assignee_email).filter(
@@ -147,6 +151,100 @@ def calculate_team_performance_matrix(
     except Exception as e:
         db.rollback()
         print("Fallback en matrix query:", e)
+    return dev_users
+
+
+def _build_dev_matrix_entry(m: Dict[str, Any], team_avg_tickets: float, team_avg_sp: float, team_avg_cycle_time: float) -> Dict[str, Any]:
+    sc = m["scorecard"]
+
+    tickets_done = _extract_sc_kpi(sc, "throughput_issues", 6)
+    sp_done = _extract_sc_kpi(sc, "velocity_sp", 20.0)
+    cycle_time = _extract_sc_kpi(sc, "cycle_time_promedio_dias", 3.2)
+    commitment = _extract_sc_kpi(sc, "commitment_rate_pct", 85.0)
+    bugs_totales = _extract_sc_kpi(sc, "bugs_totales", 0)
+    bugs_resueltos = _extract_sc_kpi(sc, "bugs_resueltos", 0)
+    wip_actual = _extract_sc_kpi(sc, "wip_actual", 0)
+    bugs_reopened = max(0, bugs_totales - bugs_resueltos)
+
+    score_res = calculate_performance_score(
+        tickets_done=tickets_done,
+        team_avg_tickets=team_avg_tickets,
+        sp_done=sp_done,
+        team_avg_sp=team_avg_sp,
+        avg_cycle_time=cycle_time,
+        team_avg_cycle_time=team_avg_cycle_time,
+        commitment_pct=commitment,
+        bugs_reopened=bugs_reopened,
+        total_bugs=bugs_totales
+    )
+
+    final_score = score_res["final_score"]
+    desglose = score_res["desglose"]
+
+    quadrant = determine_quadrant(
+        dev_cycle_time=cycle_time,
+        team_avg_cycle_time=team_avg_cycle_time,
+        quality_score=desglose["quality_score"]
+    )
+
+    explicacion_razones = []
+    if tickets_done > team_avg_tickets:
+        explicacion_razones.append(f"Supera el volumen promedio del equipo con {tickets_done} tickets entregados (Promedio: {team_avg_tickets}).")
+    elif tickets_done < team_avg_tickets:
+        explicacion_razones.append(f"Su volumen de entrega ({tickets_done} tickets) está por debajo del promedio del equipo ({team_avg_tickets}).")
+    else:
+        explicacion_razones.append(f"Mantiene una entrega constante alineada al promedio del equipo ({tickets_done} tickets).")
+
+    if 0 < cycle_time <= team_avg_cycle_time:
+        explicacion_razones.append(f"Tiempo de ciclo ágil de {cycle_time} días/ticket (promedio equipo: {team_avg_cycle_time}d).")
+    elif cycle_time > team_avg_cycle_time:
+        explicacion_razones.append(f"Tiempo de ciclo de {cycle_time}d supera el promedio del equipo ({team_avg_cycle_time}d), indicando posibles cuellos de botella.")
+
+    if desglose["quality_score"] >= 80:
+        explicacion_razones.append("Excelente índice de calidad sin devoluciones críticas de QA.")
+    else:
+        explicacion_razones.append(f"Índice de calidad de {desglose['quality_score']}% afectado por {bugs_reopened} incidencias con observaciones.")
+
+    return {
+        "assignee_id": m["assignee_id"],
+        "nombre": m["nombre"],
+        "email": m["email"],
+        "throughput_issues": tickets_done,
+        "velocity_sp": sp_done,
+        "cycle_time_dias": cycle_time,
+        "wip_actual": wip_actual,
+        "commitment_pct": commitment,
+        "quality_pct": desglose["quality_score"],
+        "performance_score": final_score,
+        "desglose_score": desglose,
+        "cuadrante": quadrant,
+        "explicacion_razones": explicacion_razones,
+        "scorecard_completo": sc
+    }
+
+
+def _assign_ranks_and_badges(matrix_developers: List[Dict[str, Any]]) -> None:
+    matrix_developers.sort(key=lambda x: x["performance_score"], reverse=True)
+    badges = ["🥇 Medalla de Oro", "🥈 Medalla de Plata", "🥉 Medalla de Bronce", "🎖️ Mención de Honor"]
+    for i, dev in enumerate(matrix_developers):
+        dev["rank_posicion"] = i + 1
+        dev["badge_honor"] = badges[i] if i < len(badges) else "🎖️ Mención de Honor"
+
+
+def calculate_team_performance_matrix(
+    db: Session,
+    proyecto_id: str = "PROJ-01",
+    sprint_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Genera la Matriz Comparativa de Equipo completa (Fase 6):
+    - Calcula métricas desglosadas por desarrollador
+    - Determina el Performance Score (0-100 pts)
+    - Asigna el cuadrante operativo
+    - Genera ranking con posiciones y explicaciones claras ("El porqué de las cosas")
+    """
+    proyecto_id = resolve_project_id(db, proyecto_id)
+    dev_users = _fetch_unique_dev_users(db, proyecto_id)
 
     if not dev_users:
         return {
@@ -164,12 +262,11 @@ def calculate_team_performance_matrix(
             "developers": []
         }
 
-    # 2. Recopilar scorecards individuales
     dev_metrics_list = []
     for d in dev_users:
         try:
             scorecard = get_developer_scorecard_data(db, proyecto_id, email_or_assignee_id=d["email"] or d["assignee_id"])
-        except Exception as e:
+        except Exception:
             db.rollback()
             scorecard = {}
 
@@ -180,110 +277,22 @@ def calculate_team_performance_matrix(
             "scorecard": scorecard
         })
 
-    # Helper para extraer KPI de manera segura
-    def extract_kpi(sc_dict, field_name, default_val):
-        if not isinstance(sc_dict, dict):
-            return default_val
-        kpis_obj = sc_dict.get("kpis")
-        if isinstance(kpis_obj, dict) and field_name in kpis_obj:
-            return kpis_obj[field_name]
-        if field_name in sc_dict:
-            return sc_dict[field_name]
-        return default_val
-
-    # 3. Calcular promedios del equipo para el benchmark
     total_devs = max(len(dev_metrics_list), 1)
-    sum_tickets = sum(extract_kpi(m["scorecard"], "throughput_issues", 6) for m in dev_metrics_list)
-    sum_sp = sum(extract_kpi(m["scorecard"], "velocity_sp", 20.0) for m in dev_metrics_list)
-    sum_ct = sum(extract_kpi(m["scorecard"], "cycle_time_promedio_dias", 3.2) for m in dev_metrics_list)
+    sum_tickets = sum(_extract_sc_kpi(m["scorecard"], "throughput_issues", 6) for m in dev_metrics_list)
+    sum_sp = sum(_extract_sc_kpi(m["scorecard"], "velocity_sp", 20.0) for m in dev_metrics_list)
+    sum_ct = sum(_extract_sc_kpi(m["scorecard"], "cycle_time_promedio_dias", 3.2) for m in dev_metrics_list)
 
     team_avg_tickets = round(sum_tickets / total_devs, 1)
     team_avg_sp = round(sum_sp / total_devs, 1)
     team_avg_cycle_time = round(sum_ct / total_devs, 1)
 
-    # 4. Procesar score y cuadrante por desarrollador
-    matrix_developers = []
-    for m in dev_metrics_list:
-        sc = m["scorecard"]
+    matrix_developers = [
+        _build_dev_matrix_entry(m, team_avg_tickets, team_avg_sp, team_avg_cycle_time)
+        for m in dev_metrics_list
+    ]
 
-        tickets_done = extract_kpi(sc, "throughput_issues", 6)
-        sp_done = extract_kpi(sc, "velocity_sp", 20.0)
-        cycle_time = extract_kpi(sc, "cycle_time_promedio_dias", 3.2)
-        commitment = extract_kpi(sc, "commitment_rate_pct", 85.0)
-        bugs_totales = extract_kpi(sc, "bugs_totales", 0)
-        bugs_resueltos = extract_kpi(sc, "bugs_resueltos", 0)
-        wip_actual = extract_kpi(sc, "wip_actual", 0)
-        bugs_reopened = max(0, bugs_totales - bugs_resueltos)
+    _assign_ranks_and_badges(matrix_developers)
 
-        # Algoritmo de Score
-        score_res = calculate_performance_score(
-            tickets_done=tickets_done,
-            team_avg_tickets=team_avg_tickets,
-            sp_done=sp_done,
-            team_avg_sp=team_avg_sp,
-            avg_cycle_time=cycle_time,
-            team_avg_cycle_time=team_avg_cycle_time,
-            commitment_pct=commitment,
-            bugs_reopened=bugs_reopened,
-            total_bugs=bugs_totales
-        )
-
-        final_score = score_res["final_score"]
-        desglose = score_res["desglose"]
-
-        # Asignación de Cuadrante
-        quadrant = determine_quadrant(
-            dev_cycle_time=cycle_time,
-            team_avg_cycle_time=team_avg_cycle_time,
-            quality_score=desglose["quality_score"]
-        )
-
-        # Generar explicación explícita de rendimiento ("El porqué de las cosas")
-        explicacion_razones = []
-        if tickets_done > team_avg_tickets:
-            explicacion_razones.append(f"Supera el volumen promedio del equipo con {tickets_done} tickets entregados (Promedio: {team_avg_tickets}).")
-        elif tickets_done < team_avg_tickets:
-            explicacion_razones.append(f"Su volumen de entrega ({tickets_done} tickets) está por debajo del promedio del equipo ({team_avg_tickets}).")
-        else:
-            explicacion_razones.append(f"Mantiene una entrega constante alineada al promedio del equipo ({tickets_done} tickets).")
-
-        if cycle_time > 0 and cycle_time <= team_avg_cycle_time:
-            explicacion_razones.append(f"Tiempo de ciclo ágil de {cycle_time} días/ticket (promedio equipo: {team_avg_cycle_time}d).")
-        elif cycle_time > team_avg_cycle_time:
-            explicacion_razones.append(f"Tiempo de ciclo de {cycle_time}d supera el promedio del equipo ({team_avg_cycle_time}d), indicando posibles cuellos de botella.")
-
-        if desglose["quality_score"] >= 80:
-            explicacion_razones.append("Excelente índice de calidad sin devoluciones críticas de QA.")
-        else:
-            explicacion_razones.append(f"Índice de calidad de {desglose['quality_score']}% afectado por {bugs_reopened} incidencias con observaciones.")
-
-        matrix_developers.append({
-            "assignee_id": m["assignee_id"],
-            "nombre": m["nombre"],
-            "email": m["email"],
-            "throughput_issues": tickets_done,
-            "velocity_sp": sp_done,
-            "cycle_time_dias": cycle_time,
-            "wip_actual": wip_actual,
-            "commitment_pct": commitment,
-            "quality_pct": desglose["quality_score"],
-            "performance_score": final_score,
-            "desglose_score": desglose,
-            "cuadrante": quadrant,
-            "explicacion_razones": explicacion_razones,
-            "scorecard_completo": sc
-        })
-
-    # 5. Ordenar desarrolladores por Performance Score descendente
-    matrix_developers.sort(key=lambda x: x["performance_score"], reverse=True)
-
-    # 6. Asignar posiciones y medallas de honor
-    badges = ["🥇 Medalla de Oro", "🥈 Medalla de Plata", "🥉 Medalla de Bronce", "🎖️ Mención de Honor"]
-    for i, dev in enumerate(matrix_developers):
-        dev["rank_posicion"] = i + 1
-        dev["badge_honor"] = badges[i] if i < len(badges) else "🎖️ Mención de Honor"
-
-    # Resumen de Cuadrantes
     conteo_cuadrantes = {
         "ESTRELLA": sum(1 for d in matrix_developers if d["cuadrante"]["codigo"] == "ESTRELLA"),
         "METODICO": sum(1 for d in matrix_developers if d["cuadrante"]["codigo"] == "METODICO"),

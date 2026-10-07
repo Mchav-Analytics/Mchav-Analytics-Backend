@@ -10,97 +10,68 @@ from app.services.kpi import get_issue_cycle_time_days
 from app.services.jira_normalizer import is_done, is_in_progress
 from app.services.project_resolver import resolve_project_id
 
-def calculate_sprint_health(
-    db: Session,
-    proyecto_id: str = "PROJ-01",
-    sprint_id: Optional[str] = None
-) -> Dict[str, Any]:
-    """
-    Calcula las métricas de predictibilidad y salud del sprint (Fase 7)
-    usando EXCLUSIVAMENTE datos reales de la BD:
-    - Commitment Reliability (%)
-    - Scope Creep Rate (%)
-    - Carryover Rate (%)
-    - Flow Efficiency (%) [Tiempo Activo vs Tiempo de Espera]
-    - Sprint Health Score (0-100 pts)
-    - Detección de cuellos de botella y alertas de Scope Creep.
-    """
-    proyecto_id = resolve_project_id(db, proyecto_id)
-    # 1. Obtener los tickets del proyecto/sprint
+STAGE_DESARROLLO_ACTIVO = "Desarrollo Activo"
+STAGE_REVISION_CODIGO = "Revisión de Código"
+STAGE_PRUEBAS_QA = "Pruebas de Calidad (QA)"
+STAGE_COLA_ESPERA = "En Cola de Espera"
+
+def _fetch_sprint_and_issues(db: Optional[Session], proyecto_id: str, sprint_id: Optional[str]):
     issues = []
     sprint_obj = None
+    if not db:
+        return sprint_obj, issues
+
     try:
-        if db:
-            if sprint_id:
-                sprint_obj = db.query(models.Sprint).filter(
-                    models.Sprint.id_sprint == sprint_id
-                ).first()
+        if sprint_id:
+            sprint_obj = db.query(models.Sprint).filter(models.Sprint.id_sprint == sprint_id).first()
 
-            query = db.query(models.Issue)
-            if proyecto_id and proyecto_id != "ALL":
-                query = query.filter(
-                    (models.Issue.id_proyecto == proyecto_id) | 
-                    (models.Issue.key_issue.ilike(f"{proyecto_id}%"))
-                )
-            
-            if sprint_id:
-                sprint_issues = query.filter(
-                    (models.Issue.id_sprint == sprint_id) | 
-                    (models.Issue.id_sprint == str(sprint_id))
-                ).all()
-                if sprint_issues:
-                    issues = sprint_issues
-                else:
-                    issues = query.all()
-            else:
-                issues = query.all()
+        query = db.query(models.Issue)
+        if proyecto_id and proyecto_id != "ALL":
+            query = query.filter(
+                (models.Issue.id_proyecto == proyecto_id) | 
+                (models.Issue.key_issue.ilike(f"{proyecto_id}%"))
+            )
 
-            if not issues and db:
-                issues = db.query(models.Issue).all()
+        if sprint_id:
+            sprint_issues = query.filter(
+                (models.Issue.id_sprint == sprint_id) | 
+                (models.Issue.id_sprint == str(sprint_id))
+            ).all()
+            issues = sprint_issues if sprint_issues else query.all()
+        else:
+            issues = query.all()
+
+        if not issues:
+            issues = db.query(models.Issue).all()
     except Exception as e:
         print("Aviso: Error en sprint_health:", e)
-        if db:
-            db.rollback()
+        db.rollback()
 
-    total_issues = len(issues)
+    return sprint_obj, issues
 
-    # Si no hay issues en absoluto, retornar estado con métricas por defecto
-    if total_issues == 0:
-        return _empty_health_response(proyecto_id, sprint_id)
 
+def _process_issue_sprint_metrics(issues, sprint_start_date, db: Optional[Session], proyecto_id: str):
     sp_adjusted_commitment = 0.0
     sp_completed = 0.0
     sp_added_mid_sprint = 0.0
     sp_removed_mid_sprint = 0.0
     sp_carryover = 0.0
     tickets_changed = 0
-
     active_dev_days = 0.0
     waiting_queue_days = 0.0
-
-    # Bottleneck breakdown by issue type / stage
     bottleneck_stages = {
-        "Desarrollo Activo": 0.0,
-        "Revisión de Código": 0.0,
-        "Pruebas de Calidad (QA)": 0.0,
-        "En Cola de Espera": 0.0
+        STAGE_DESARROLLO_ACTIVO: 0.0,
+        STAGE_REVISION_CODIGO: 0.0,
+        STAGE_PRUEBAS_QA: 0.0,
+        STAGE_COLA_ESPERA: 0.0
     }
-
-    # Fecha de inicio del sprint para detectar scope creep
-    sprint_start_date = None
-    if sprint_obj and sprint_obj.fecha_inicio:
-        sprint_start_date = sprint_obj.fecha_inicio
-        if sprint_start_date.tzinfo is None:
-            sprint_start_date = sprint_start_date.replace(tzinfo=timezone.utc)
 
     for issue in issues:
         sp = float(issue.story_points or 0.0)
         st = (issue.status_actual or "").lower().strip()
         ct = get_issue_cycle_time_days(issue)
-
         sp_adjusted_commitment += sp
 
-        # Detectar Scope Creep: tickets añadidos DESPUÉS del inicio del sprint
         if sprint_start_date and issue.created_at:
             created = issue.created_at
             if created.tzinfo is None:
@@ -109,7 +80,6 @@ def calculate_sprint_health(
                 sp_added_mid_sprint += sp
                 tickets_changed += 1
 
-        # Detectar Retirados (Cancelados / Rechazados a mitad de sprint)
         if st in ("cancelled", "cancelado", "rejected", "rechazado", "won't do"):
             sp_removed_mid_sprint += sp
             if sprint_start_date and issue.updated_at:
@@ -124,64 +94,46 @@ def calculate_sprint_health(
             if ct > 0:
                 active_dev_days += ct * 0.75
                 waiting_queue_days += ct * 0.25
-                bottleneck_stages["Desarrollo Activo"] += ct * 0.75
-                bottleneck_stages["Pruebas de Calidad (QA)"] += ct * 0.25
+                bottleneck_stages[STAGE_DESARROLLO_ACTIVO] += ct * 0.75
+                bottleneck_stages[STAGE_PRUEBAS_QA] += ct * 0.25
         elif is_in_progress(st, db, proyecto_id) and st not in ("in review", "en revisión", "en revision", "review", "qa", "en pruebas"):
             if ct > 0:
                 active_dev_days += ct * 0.8
                 waiting_queue_days += ct * 0.2
-                bottleneck_stages["Desarrollo Activo"] += ct * 0.8
-                bottleneck_stages["Revisión de Código"] += ct * 0.2
+                bottleneck_stages[STAGE_DESARROLLO_ACTIVO] += ct * 0.8
+                bottleneck_stages[STAGE_REVISION_CODIGO] += ct * 0.2
         elif st in ("in review", "en revisión", "en revision", "review", "qa", "en pruebas"):
             if ct > 0:
                 active_dev_days += ct * 0.3
                 waiting_queue_days += ct * 0.7
-                bottleneck_stages["Revisión de Código"] += ct * 0.7
-                bottleneck_stages["Pruebas de Calidad (QA)"] += ct * 0.3
-        else:  # To Do / Backlog — carryover candidate
+                bottleneck_stages[STAGE_REVISION_CODIGO] += ct * 0.7
+                bottleneck_stages[STAGE_PRUEBAS_QA] += ct * 0.3
+        else:
             sp_carryover += sp
             waiting_queue_days += 1.0
-            bottleneck_stages["En Cola de Espera"] += 1.0
+            bottleneck_stages[STAGE_COLA_ESPERA] += 1.0
 
-    # 2. Cálculo de Porcentajes de Predictibilidad
-    # El commitment inicial es el ajustado menos los que se agregaron más los que se quitaron
-    sp_initial_commitment = max(sp_adjusted_commitment - sp_added_mid_sprint + sp_removed_mid_sprint, 0.0)
-    
-    # El % de predictibilidad se calcula sobre el initial commitment (qué tan predecible fuiste respecto al plan)
-    # PDF: Story Points completados / Story Points planificados inicialmente × 100
-    commitment_reliability_pct = round(min((sp_completed / max(sp_initial_commitment, 1.0)) * 100.0, 100.0), 1)
-    
-    # PDF: Scope Creep = SP agregados despues del inicio / SP comprometidos inicialmente * 100
-    scope_creep_pct = round(min((sp_added_mid_sprint / max(sp_initial_commitment, 1.0)) * 100.0, 100.0), 1)
-    carryover_pct = round(min((sp_carryover / max(sp_initial_commitment, 1.0)) * 100.0, 100.0), 1)
+    return {
+        "sp_adjusted_commitment": sp_adjusted_commitment,
+        "sp_completed": sp_completed,
+        "sp_added_mid_sprint": sp_added_mid_sprint,
+        "sp_removed_mid_sprint": sp_removed_mid_sprint,
+        "sp_carryover": sp_carryover,
+        "tickets_changed": tickets_changed,
+        "active_dev_days": active_dev_days,
+        "waiting_queue_days": waiting_queue_days,
+        "bottleneck_stages": bottleneck_stages
+    }
 
-    total_flow_time = max(active_dev_days + waiting_queue_days, 0.1)
-    flow_efficiency_pct = round(min((active_dev_days / total_flow_time) * 100.0, 100.0), 1)
 
-    # 3. Fórmula Ponderada de Sprint Health Score (0-100 pts)
-    health_score = round(
-        (0.35 * commitment_reliability_pct) +
-        (0.25 * max(0.0, 100.0 - scope_creep_pct)) +
-        (0.20 * max(0.0, 100.0 - carryover_pct)) +
-        (0.20 * flow_efficiency_pct),
-        1
-    )
-
-    # Diagnóstico del Sprint
+def _compute_health_diagnosis(health_score: float, scope_creep_pct: float, sp_added_mid_sprint: float, bottleneck_stages: dict, total_flow_time: float):
     if health_score >= 80.0:
-        diagnostico = "EXCELENTE"
-        diagnostico_label = "Sprint Saludable & Altamente Predictible"
-        color = "emerald"
+        diagnostico, diagnostico_label, color = "EXCELENTE", "Sprint Saludable & Altamente Predictible", "emerald"
     elif health_score >= 60.0:
-        diagnostico = "ACEPTABLE"
-        diagnostico_label = "Sprint Estable con Fricciones Menores"
-        color = "amber"
+        diagnostico, diagnostico_label, color = "ACEPTABLE", "Sprint Estable con Fricciones Menores", "amber"
     else:
-        diagnostico = "CRITICO"
-        diagnostico_label = "Sprint en Riesgo de Desviación Severa"
-        color = "rose"
+        diagnostico, diagnostico_label, color = "CRITICO", "Sprint en Riesgo de Desviación Severa", "rose"
 
-    # Alerta de Scope Creep destacado (> 15%)
     scope_creep_warning = None
     if scope_creep_pct > 15.0:
         scope_creep_warning = {
@@ -190,7 +142,6 @@ def calculate_sprint_health(
             "level": "WARNING"
         }
 
-    # Identificación del Cuello de Botella Principal en el Flujo
     max_stage = max(bottleneck_stages.items(), key=lambda item: item[1]) if bottleneck_stages else ("N/A", 0)
     bottleneck_insight = {
         "main_stage": max_stage[0],
@@ -198,6 +149,53 @@ def calculate_sprint_health(
         "percentage": round((max_stage[1] / total_flow_time) * 100.0, 1),
         "recommendation": f"El mayor tiempo acumulado en el flujo se encuentra en '{max_stage[0]}'. Revisar la capacidad del área para agilizar las entregas."
     }
+
+    return diagnostico, diagnostico_label, color, scope_creep_warning, bottleneck_insight
+
+
+def calculate_sprint_health(
+    db: Optional[Session] = None,
+    proyecto_id: str = "PROJ-01",
+    sprint_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Calcula las métricas de predictibilidad y salud del sprint (Fase 7)
+    usando EXCLUSIVAMENTE datos reales de la BD.
+    """
+    proyecto_id = resolve_project_id(db, proyecto_id)
+    sprint_obj, issues = _fetch_sprint_and_issues(db, proyecto_id, sprint_id)
+
+    total_issues = len(issues)
+    if total_issues == 0:
+        return _empty_health_response(proyecto_id, sprint_id)
+
+    sprint_start_date = None
+    if sprint_obj and sprint_obj.fecha_inicio:
+        sprint_start_date = sprint_obj.fecha_inicio
+        if sprint_start_date.tzinfo is None:
+            sprint_start_date = sprint_start_date.replace(tzinfo=timezone.utc)
+
+    m = _process_issue_sprint_metrics(issues, sprint_start_date, db, proyecto_id)
+
+    sp_initial_commitment = max(m["sp_adjusted_commitment"] - m["sp_added_mid_sprint"] + m["sp_removed_mid_sprint"], 0.0)
+    commitment_reliability_pct = round(min((m["sp_completed"] / max(sp_initial_commitment, 1.0)) * 100.0, 100.0), 1)
+    scope_creep_pct = round(min((m["sp_added_mid_sprint"] / max(sp_initial_commitment, 1.0)) * 100.0, 100.0), 1)
+    carryover_pct = round(min((m["sp_carryover"] / max(sp_initial_commitment, 1.0)) * 100.0, 100.0), 1)
+
+    total_flow_time = max(m["active_dev_days"] + m["waiting_queue_days"], 0.1)
+    flow_efficiency_pct = round(min((m["active_dev_days"] / total_flow_time) * 100.0, 100.0), 1)
+
+    health_score = round(
+        (0.35 * commitment_reliability_pct) +
+        (0.25 * max(0.0, 100.0 - scope_creep_pct)) +
+        (0.20 * max(0.0, 100.0 - carryover_pct)) +
+        (0.20 * flow_efficiency_pct),
+        1
+    )
+
+    diagnostico, diagnostico_label, color, scope_creep_warning, bottleneck_insight = _compute_health_diagnosis(
+        health_score, scope_creep_pct, m["sp_added_mid_sprint"], m["bottleneck_stages"], total_flow_time
+    )
 
     return {
         "proyecto_id": proyecto_id,
@@ -212,27 +210,28 @@ def calculate_sprint_health(
             "carryover_pct": carryover_pct,
             "flow_efficiency_pct": flow_efficiency_pct,
             "sp_initial_commitment": round(sp_initial_commitment, 1),
-            "sp_adjusted_commitment": round(sp_adjusted_commitment, 1),
-            "sp_completed": round(sp_completed, 1),
-            "sp_added_mid_sprint": round(sp_added_mid_sprint, 1),
-            "sp_removed_mid_sprint": round(sp_removed_mid_sprint, 1),
-            "tickets_changed": tickets_changed,
-            "sp_carryover": round(sp_carryover, 1),
-            "active_dev_days": round(active_dev_days, 1),
-            "waiting_queue_days": round(waiting_queue_days, 1)
+            "sp_adjusted_commitment": round(m["sp_adjusted_commitment"], 1),
+            "sp_completed": round(m["sp_completed"], 1),
+            "sp_added_mid_sprint": round(m["sp_added_mid_sprint"], 1),
+            "sp_removed_mid_sprint": round(m["sp_removed_mid_sprint"], 1),
+            "tickets_changed": m["tickets_changed"],
+            "sp_carryover": round(m["sp_carryover"], 1),
+            "active_dev_days": round(m["active_dev_days"], 1),
+            "waiting_queue_days": round(m["waiting_queue_days"], 1)
         },
         "bottleneck_stages": [
             {"stage": stage, "days": round(days, 1), "pct": round((days / total_flow_time) * 100.0, 1)}
-            for stage, days in bottleneck_stages.items()
+            for stage, days in m["bottleneck_stages"].items()
         ],
         "bottleneck_insight": bottleneck_insight,
         "scope_creep_warning": scope_creep_warning,
-        "gemini_insights": _build_gemini_insights(proyecto_id, health_score, commitment_reliability_pct, sp_added_mid_sprint, flow_efficiency_pct, bottleneck_insight)
+        "gemini_insights": _build_gemini_insights(proyecto_id, health_score, commitment_reliability_pct, m["sp_added_mid_sprint"], flow_efficiency_pct, bottleneck_insight)
     }
 
 
-def _build_gemini_insights(proyecto_id: str, health_score: int, commitment: float, scope_creep: float, flow_eff: float, bottleneck_text: str) -> dict:
+def _build_gemini_insights(proyecto_id: str, health_score: float, commitment: float, scope_creep: float, flow_eff: float, bottleneck_insight: Any) -> dict:
     """Genera diagnósticos analíticos ejecutivos para el Planificador impulsados por Gemini."""
+    bottleneck_text = bottleneck_insight.get("recommendation", "") if isinstance(bottleneck_insight, dict) else str(bottleneck_insight or "")
     fallback_insights = {
         "diagnostico_ejecutivo": f"El proyecto '{proyecto_id}' registra una salud general de {health_score}/100 pts con un cumplimiento de compromiso del {commitment}%.",
         "principal_riesgo": bottleneck_text or f"Desviación por alcance agregado de +{scope_creep} Story Points en el sprint actual.",
@@ -278,19 +277,54 @@ def _empty_health_response(proyecto_id: str, sprint_id: str = None) -> Dict[str,
             "waiting_queue_days": 2
         },
         "bottleneck_stages": [
-            {"stage": "Desarrollo Activo", "days": 4.5, "percentage": 45},
-            {"stage": "Revisión de Código", "days": 2.0, "percentage": 20},
-            {"stage": "Pruebas de Calidad (QA)", "days": 2.5, "percentage": 25},
-            {"stage": "En Cola de Espera", "days": 1.0, "percentage": 10}
+            {"stage": STAGE_DESARROLLO_ACTIVO, "days": 4.5, "percentage": 45},
+            {"stage": STAGE_REVISION_CODIGO, "days": 2.0, "percentage": 20},
+            {"stage": STAGE_PRUEBAS_QA, "days": 2.5, "percentage": 25},
+            {"stage": STAGE_COLA_ESPERA, "days": 1.0, "percentage": 10}
         ],
         "bottleneck_insight": {
-            "main_stage": "Desarrollo Activo",
+            "main_stage": STAGE_DESARROLLO_ACTIVO,
             "days_spent": 4.5,
             "percentage": 45,
             "recommendation": "Presione 'Sincronizar Jira' en el panel superior para actualizar métricas en vivo."
         },
         "scope_creep_warning": None
     }
+
+
+def _evaluate_day_burndown(issues, transitions, current_eod, current_day, use_count: bool) -> tuple:
+    remaining_sp = 0.0
+    completed_tasks_count = 0
+    done_statuses = ("done", "finalizado", "cerrado", "completado")
+
+    for issue in issues:
+        sp = 1.0 if use_count else 0.0
+        if not use_count:
+            try:
+                sp = float(issue.story_points or 0)
+            except Exception:
+                pass
+
+        issue_transitions = []
+        for t in transitions:
+            if t.id_jira == issue.id_jira:
+                t_date = t.fecha_cambio.replace(tzinfo=None) if t.fecha_cambio and t.fecha_cambio.tzinfo else t.fecha_cambio
+                if t_date and t_date <= current_eod:
+                    issue_transitions.append(t)
+
+        status = issue_transitions[-1].estado_nuevo if issue_transitions else (issue.estado or "Por hacer")
+        is_done = bool(status and status.lower() in done_statuses)
+
+        if not is_done:
+            remaining_sp += sp
+        elif issue_transitions:
+            last_t_date = issue_transitions[-1].fecha_cambio
+            if last_t_date and last_t_date.tzinfo:
+                last_t_date = last_t_date.replace(tzinfo=None)
+            if last_t_date and last_t_date.date() == current_day.date():
+                completed_tasks_count += 1
+
+    return remaining_sp, completed_tasks_count
 
 
 def calculate_burndown_chart_data(
@@ -303,7 +337,6 @@ def calculate_burndown_chart_data(
     """
     from datetime import timedelta
     
-    # 1. Fetch Sprint
     sprint = None
     if sprint_id:
         sprint = db.query(models.Sprint).filter_by(id_sprint=sprint_id, id_proyecto=proyecto_id).first()
@@ -317,14 +350,11 @@ def calculate_burndown_chart_data(
     start_date = sprint.fecha_inicio
     end_date = sprint.fecha_fin
     
-    # If datetimes have timezone info, strip it or normalize
     if start_date.tzinfo: start_date = start_date.replace(tzinfo=None)
     if end_date.tzinfo: end_date = end_date.replace(tzinfo=None)
     
-    delta_days = (end_date - start_date).days
-    if delta_days <= 0: delta_days = 1
+    delta_days = max(1, (end_date - start_date).days)
 
-    # 2. Fetch issues
     issues = db.query(models.Issue).filter(
         models.Issue.id_proyecto == proyecto_id,
         models.Issue.id_sprint == sprint.id_sprint
@@ -334,15 +364,13 @@ def calculate_burndown_chart_data(
     for i in issues:
         try:
             total_sp += float(i.story_points or 0)
-        except:
+        except Exception:
             pass
             
-    # If no SP, fallback to counting issues
-    use_count = total_sp == 0
+    use_count = (total_sp == 0)
     if use_count:
         total_sp = float(len(issues))
     
-    # 3. Fetch transitions
     issue_ids = [i.id_jira for i in issues]
     transitions = []
     if issue_ids:
@@ -351,58 +379,15 @@ def calculate_burndown_chart_data(
         ).order_by(models.TransicionEstadoIssue.fecha_cambio.asc()).all()
 
     burndown_data = []
-    
-    # 4. Generate daily data
     for i in range(delta_days + 1):
         current_day = start_date + timedelta(days=i)
         current_eod = current_day.replace(hour=23, minute=59, second=59)
-        
-        ideal = total_sp - (total_sp / delta_days) * i
-        if ideal < 0: ideal = 0
-        
-        remaining_sp = 0.0
-        completed_tasks_count = 0
-        
-        for issue in issues:
-            sp = 1.0 if use_count else 0.0
-            if not use_count:
-                try: sp = float(issue.story_points or 0)
-                except: pass
-                
-            # Filter transitions up to this day
-            issue_transitions = []
-            for t in transitions:
-                if t.id_jira == issue.id_jira:
-                    t_date = t.fecha_cambio
-                    if t_date.tzinfo: t_date = t_date.replace(tzinfo=None)
-                    if t_date <= current_eod:
-                        issue_transitions.append(t)
-            
-            # Default to issue current status if no transitions and we're past its creation?
-            # Actually, standard behavior: assume it's NOT done unless we have a transition saying it is.
-            # However, if it has NO transitions, we look at issue.estado
-            status = "Por hacer"
-            if issue_transitions:
-                status = issue_transitions[-1].estado_nuevo
-            else:
-                # If no historical transitions are tracked, just use the current issue state
-                # but only if the issue was created before this day.
-                # To be safe, if no transitions, just treat it as its current state.
-                status = issue.estado or "Por hacer"
-                
-            is_done = status and status.lower() in ["done", "finalizado", "cerrado", "completado"]
-            
-            if not is_done:
-                remaining_sp += sp
-                
-            if is_done and issue_transitions:
-                # Check if it was moved to done ON this exact day
-                last_t_date = issue_transitions[-1].fecha_cambio
-                if last_t_date.tzinfo: last_t_date = last_t_date.replace(tzinfo=None)
-                if last_t_date.date() == current_day.date():
-                    completed_tasks_count += 1
-                    
-        # Para que el frontend tenga un formato bonito
+        ideal = max(0.0, total_sp - (total_sp / delta_days) * i)
+
+        remaining_sp, completed_tasks_count = _evaluate_day_burndown(
+            issues, transitions, current_eod, current_day, use_count
+        )
+
         burndown_data.append({
             "fecha": f"Día {i}",
             "fecha_real": current_day.strftime("%d/%m"),

@@ -55,6 +55,7 @@ GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-flash-lite-latest").s
 # Nombre de la cookie HTTP-Only donde se almacena el ID de usuario firmado (HMAC).
 # DEBE coincidir con el nombre usado en response.set_cookie(...) al hacer login.
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "session_id").strip()
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").lower() in ("true", "1", "yes")
 
 # -----------------------------------------------------------------------------
 # SEGURIDAD Y PROTECCIÓN DE LA DOCUMENTACIÓN OPENAPI / SWAGGER (/docs)

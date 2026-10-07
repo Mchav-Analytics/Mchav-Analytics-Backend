@@ -19,9 +19,11 @@ from app.services.project_resolver import resolve_project_id
 
 router = APIRouter()
 
+DESC_PROYECTO_ID = "ID del proyecto"
+
 @router.get("/matrix")
 def get_team_performance_matrix(
-    proyecto_id: Optional[str] = Query(None, description="ID del proyecto"),
+    proyecto_id: Optional[str] = Query(None, description=DESC_PROYECTO_ID),
     sprint_id: str = Query(None, description="ID del sprint opcional"),
     db: Session = Depends(get_db)
 ):
@@ -53,7 +55,7 @@ def get_team_performance_matrix(
 
 @router.get("/me/scorecard")
 def get_my_scorecard(
-    proyecto_id: Optional[str] = Query(None, description="ID del proyecto a consultar"),
+    proyecto_id: Optional[str] = Query(None, description=DESC_PROYECTO_ID),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -66,7 +68,7 @@ def get_my_scorecard(
 
 @router.get("/me/daily-focus")
 def get_my_daily_focus(
-    proyecto_id: Optional[str] = Query(None, description="ID del proyecto"),
+    proyecto_id: Optional[str] = Query(None, description=DESC_PROYECTO_ID),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -79,7 +81,7 @@ def get_my_daily_focus(
 
 @router.get("/me/alerts")
 def get_my_alerts(
-    proyecto_id: Optional[str] = Query(None, description="ID del proyecto"),
+    proyecto_id: Optional[str] = Query(None, description=DESC_PROYECTO_ID),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -104,7 +106,7 @@ def execute_alert_action(
 
 @router.get("/me/activity-history")
 def get_my_activity_history(
-    proyecto_id: Optional[str] = Query(None, description="ID del proyecto"),
+    proyecto_id: Optional[str] = Query(None, description=DESC_PROYECTO_ID),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -117,7 +119,7 @@ def get_my_activity_history(
 
 @router.get("/me/issues")
 def get_my_issues(
-    proyecto_id: Optional[str] = Query(None, description="ID del proyecto"),
+    proyecto_id: Optional[str] = Query(None, description=DESC_PROYECTO_ID),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -135,7 +137,7 @@ def get_my_issues(
 
 @router.get("")
 def list_developers(
-    proyecto_id: Optional[str] = Query(None, description="ID del proyecto"),
+    proyecto_id: Optional[str] = Query(None, description=DESC_PROYECTO_ID),
     db: Session = Depends(get_db)
 ):
     """
@@ -166,7 +168,7 @@ def list_developers(
 @router.get("/{assignee_id}/scorecard")
 def get_developer_scorecard_by_id(
     assignee_id: str,
-    proyecto_id: Optional[str] = Query(None, description="ID del proyecto"),
+    proyecto_id: Optional[str] = Query(None, description=DESC_PROYECTO_ID),
     db: Session = Depends(get_db)
 ):
     """
@@ -180,7 +182,7 @@ from pydantic import BaseModel
 class TaskStatusUpdate(BaseModel):
     status: str
 
-@router.patch("/me/agenda-tasks/{task_key}")
+@router.patch("/me/agenda-tasks/{task_key}", responses={404: {"description": "Issue not found"}})
 def update_task_status(
     task_key: str,
     payload: TaskStatusUpdate,
